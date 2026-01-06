@@ -29,7 +29,7 @@
 #define UCS_LOG_METADATA_FMT    "%17s:%-4u %-4s %-5s %*s"
 #define UCS_LOG_PROC_DATA_FMT   "[%s:%-5d:%s]"
 
-#define UCS_LOG_COMPACT_FMT UCS_LOG_TIME_FMT " " UCS_LOG_PROC_DATA_FMT "  "
+#define UCS_LOG_OUTPUT_FMT  UCS_LOG_TIME_FMT " " UCS_LOG_PROC_DATA_FMT "  "
 #define UCS_LOG_SHORT_FMT   UCS_LOG_TIME_FMT " [%s] " UCS_LOG_METADATA_FMT
 #define UCS_LOG_FMT \
     UCS_LOG_TIME_FMT " " UCS_LOG_PROC_DATA_FMT " " UCS_LOG_METADATA_FMT
@@ -43,8 +43,7 @@
 #define UCS_LOG_PROC_DATA_ARG() \
     ucs_log_hostname, ucs_log_get_pid(), ucs_log_get_thread_name()
 
-#define UCS_LOG_COMPACT_ARG(_tv)\
-    UCS_LOG_TIME_ARG(_tv), UCS_LOG_PROC_DATA_ARG()
+#define UCS_LOG_OUTPUT_ARG(_tv) UCS_LOG_TIME_ARG(_tv), UCS_LOG_PROC_DATA_ARG()
 
 #define UCS_LOG_SHORT_ARG(_short_file, _line, _level, _comp_conf, _tv) \
     UCS_LOG_TIME_ARG(_tv), ucs_log_get_thread_name(), \
@@ -54,23 +53,62 @@
     UCS_LOG_TIME_ARG(_tv), UCS_LOG_PROC_DATA_ARG(), \
             UCS_LOG_METADATA_ARG(_short_file, _line, _level, _comp_conf)
 
+#define UCS_LOG_PRINTF(_valgrind_fmt, _valgrind_args, _file_fmt, _file_args, \
+                       _stdout_fmt, _stdout_args, _message) \
+    do { \
+        if (RUNNING_ON_VALGRIND) { \
+            size_t buffer_size = ucs_log_get_buffer_size(); \
+            char *log_buf      = ucs_alloca(buffer_size + 1); \
+            snprintf(log_buf, buffer_size, _valgrind_fmt "%s\n", \
+                     _valgrind_args, _message); \
+            VALGRIND_PRINTF("%s", log_buf); \
+        } else if (ucs_log_initialized) { \
+            if (ucs_unlikely(ucs_log_file_close)) { \
+                int log_entry_len = snprintf(NULL, 0, _file_fmt "%s\n", \
+                                             _file_args, _message); \
+                ucs_log_handle_file_max_size(log_entry_len); \
+            } \
+            fprintf(ucs_log_file, _file_fmt "%s\n", _file_args, _message); \
+        } else { \
+            fprintf(stdout, _stdout_fmt "%s\n", _stdout_args, _message); \
+        } \
+    } while (0)
+
+/**
+ * Format message from varargs: if format is just "%s", use the string directly
+ * to allow messages bigger than the maximal stack allocation size without
+ * another heap allocation. Otherwise, format into a stack buffer.
+ *
+ * @param _format The format string.
+ * @param _ap The va_list of arguments.
+ * @return The formatted message.
+ */
+#define UCS_LOG_FORMAT_MESSAGE(_format, _ap) \
+    ({ \
+        const char *_message; \
+        if (strcmp((_format), "%s") == 0) { \
+            _message = va_arg((_ap), const char*); \
+        } else { \
+            size_t _buffer_size = ucs_log_get_buffer_size(); \
+            char *_buf          = ucs_alloca(_buffer_size + 1); \
+            _buf[_buffer_size]  = '\0'; \
+            vsnprintf(_buf, _buffer_size, (_format), (_ap)); \
+            _message = _buf; \
+        } \
+        _message; \
+    })
+
 KHASH_MAP_INIT_STR(ucs_log_filter, char);
 
 const char *ucs_log_level_names[] = {
-    [UCS_LOG_LEVEL_FATAL]        = "FATAL",
-    [UCS_LOG_LEVEL_ERROR]        = "ERROR",
-    [UCS_LOG_LEVEL_WARN]         = "WARN",
-    [UCS_LOG_LEVEL_DIAG]         = "DIAG",
-    [UCS_LOG_LEVEL_INFO]         = "INFO",
-    [UCS_LOG_LEVEL_DEBUG]        = "DEBUG",
-    [UCS_LOG_LEVEL_TRACE]        = "TRACE",
-    [UCS_LOG_LEVEL_TRACE_REQ]    = "REQ",
-    [UCS_LOG_LEVEL_TRACE_DATA]   = "DATA",
-    [UCS_LOG_LEVEL_TRACE_ASYNC]  = "ASYNC",
-    [UCS_LOG_LEVEL_TRACE_FUNC]   = "FUNC",
-    [UCS_LOG_LEVEL_TRACE_POLL]   = "POLL",
-    [UCS_LOG_LEVEL_LAST]         = NULL,
-    [UCS_LOG_LEVEL_PRINT]        = "PRINT"
+    [UCS_LOG_LEVEL_FATAL] = "FATAL",     [UCS_LOG_LEVEL_ERROR] = "ERROR",
+    [UCS_LOG_LEVEL_WARN] = "WARN",       [UCS_LOG_LEVEL_DIAG] = "DIAG",
+    [UCS_LOG_LEVEL_INFO] = "INFO",       [UCS_LOG_LEVEL_DEBUG] = "DEBUG",
+    [UCS_LOG_LEVEL_TRACE] = "TRACE",     [UCS_LOG_LEVEL_TRACE_REQ] = "REQ",
+    [UCS_LOG_LEVEL_TRACE_DATA] = "DATA", [UCS_LOG_LEVEL_TRACE_ASYNC] = "ASYNC",
+    [UCS_LOG_LEVEL_TRACE_FUNC] = "FUNC", [UCS_LOG_LEVEL_TRACE_POLL] = "POLL",
+    [UCS_LOG_LEVEL_LAST] = NULL,         [UCS_LOG_LEVEL_PRINT] = "PRINT",
+    [UCS_LOG_LEVEL_OUTPUT] = NULL
 };
 
 static unsigned ucs_log_handlers_count       = 0;
@@ -225,60 +263,30 @@ static void ucs_log_handle_file_max_size(int log_entry_len)
                            &next_token, NULL);
 }
 
-void ucs_log_print_compact(const char *str)
-{
-    struct timeval tv;
-
-    gettimeofday(&tv, NULL);
-
-    if (RUNNING_ON_VALGRIND) {
-        VALGRIND_PRINTF(UCS_LOG_TIME_FMT " %s\n", UCS_LOG_TIME_ARG(&tv), str);
-    } else if (ucs_log_initialized) {
-        if (ucs_log_file_close) { /* non-stdout/stderr */
-            ucs_log_handle_file_max_size(strlen(str) + 1);
-        }
-
-        fprintf(ucs_log_file, UCS_LOG_COMPACT_FMT " %s\n",
-                UCS_LOG_COMPACT_ARG(&tv), str);
-    } else {
-        fprintf(stdout, UCS_LOG_COMPACT_FMT " %s\n", UCS_LOG_COMPACT_ARG(&tv),
-                str);
-    }
-}
-
 static void
 ucs_log_print_single_line(const char *short_file, int line,
                           ucs_log_level_t level,
                           const ucs_log_component_config_t *comp_conf,
                           const struct timeval *tv, const char *message)
 {
-    size_t buffer_size;
-    int log_entry_len;
-    char *log_buf;
-
-    if (RUNNING_ON_VALGRIND) {
-        buffer_size = ucs_log_get_buffer_size();
-        log_buf     = ucs_alloca(buffer_size + 1);
-        snprintf(log_buf, buffer_size, UCS_LOG_SHORT_FMT "%s\n",
-                 UCS_LOG_SHORT_ARG(short_file, line, level, comp_conf, tv),
-                 message);
-        VALGRIND_PRINTF("%s", log_buf);
-    } else if (ucs_log_initialized) {
-        if (ucs_unlikely(ucs_log_file_close)) { /* non-stdout/stderr */
-            /* get log entry size */
-            log_entry_len = snprintf(NULL, 0, UCS_LOG_FMT "%s\n",
-                                     UCS_LOG_ARG(short_file, line, level,
-                                                 comp_conf, tv),
-                                     message);
-            ucs_log_handle_file_max_size(log_entry_len);
-        }
-
-        fprintf(ucs_log_file, UCS_LOG_FMT "%s\n",
-                UCS_LOG_ARG(short_file, line, level, comp_conf, tv), message);
+    if (ucs_unlikely(level == UCS_LOG_LEVEL_OUTPUT)) {
+        UCS_LOG_PRINTF(UCS_LOG_TIME_FMT, /* valgrind fmt */
+                       UCS_LOG_TIME_ARG(tv), /* valgrind args */
+                       UCS_LOG_OUTPUT_FMT, /* file fmt */
+                       UCS_LOG_OUTPUT_ARG(tv), /* file args */
+                       UCS_LOG_OUTPUT_FMT, /* stdout fmt */
+                       UCS_LOG_OUTPUT_ARG(tv), /* stdout args */
+                       message);
     } else {
-        fprintf(stdout, UCS_LOG_SHORT_FMT "%s\n",
-                UCS_LOG_SHORT_ARG(short_file, line, level, comp_conf, tv),
-                message);
+        UCS_LOG_PRINTF(UCS_LOG_SHORT_FMT,
+                       UCS_LOG_SHORT_ARG(short_file, line, level, comp_conf,
+                                         tv),
+                       UCS_LOG_FMT,
+                       UCS_LOG_ARG(short_file, line, level, comp_conf, tv),
+                       UCS_LOG_SHORT_FMT,
+                       UCS_LOG_SHORT_ARG(short_file, line, level, comp_conf,
+                                         tv),
+                       message);
     }
 }
 
@@ -317,7 +325,15 @@ ucs_log_print_multi_line(const char *short_file, int line,
     size_t strb_buffer_capacity;
 
     /* Format the log prefix once */
-    if (RUNNING_ON_VALGRIND || !ucs_log_initialized) {
+    if (level == UCS_LOG_LEVEL_OUTPUT) {
+        if (RUNNING_ON_VALGRIND) {
+            ucs_string_buffer_appendf(&prefix, UCS_LOG_TIME_FMT,
+                                      UCS_LOG_TIME_ARG(tv));
+        } else {
+            ucs_string_buffer_appendf(&prefix, UCS_LOG_OUTPUT_FMT,
+                                      UCS_LOG_OUTPUT_ARG(tv));
+        }
+    } else if (RUNNING_ON_VALGRIND || !ucs_log_initialized) {
         ucs_string_buffer_appendf(&prefix, UCS_LOG_SHORT_FMT,
                                   UCS_LOG_SHORT_ARG(short_file, line, level,
                                                     comp_conf, tv));
@@ -370,18 +386,36 @@ ucs_log_print_multi_line(const char *short_file, int line,
 
 static void ucs_log_print(const char *file, int line, ucs_log_level_t level,
                           const ucs_log_component_config_t *comp_conf,
-                          const struct timeval *tv, const char *message)
+                          const char *message)
 {
-    const char *short_file     = ucs_basename(file);
-    const char *first_line_end = strchr(message, '\n');
+    struct timeval tv;
+    const char *short_file;
+    const char *first_line_end;
+
+    gettimeofday(&tv, NULL);
+
+    short_file     = ucs_likely(file != NULL) ? ucs_basename(file) : NULL;
+    first_line_end = strchr(message, '\n');
 
     if (ucs_unlikely(first_line_end != NULL)) {
-        ucs_log_print_multi_line(short_file, line, level, comp_conf, tv,
+        ucs_log_print_multi_line(short_file, line, level, comp_conf, &tv,
                                  message, first_line_end);
     } else {
-        ucs_log_print_single_line(short_file, line, level, comp_conf, tv,
+        ucs_log_print_single_line(short_file, line, level, comp_conf, &tv,
                                   message);
     }
+}
+
+void ucs_log_print_output(const char *format, ...)
+{
+    const char *message;
+    va_list ap;
+
+    va_start(ap, format);
+    message = UCS_LOG_FORMAT_MESSAGE(format, ap);
+    va_end(ap);
+
+    ucs_log_print(NULL, 0, UCS_LOG_LEVEL_OUTPUT, NULL, message);
 }
 
 ucs_log_func_rc_t
@@ -390,7 +424,6 @@ ucs_log_default_handler(const char *file, unsigned line, const char *function,
                         const ucs_log_component_config_t *comp_conf,
                         const char *format, va_list ap)
 {
-    struct timeval tv;
     khiter_t khiter;
     char match;
     int khret;
@@ -428,25 +461,12 @@ ucs_log_default_handler(const char *file, unsigned line, const char *function,
         return UCS_LOG_FUNC_RC_CONTINUE;
     }
 
-    if (strcmp(format, "%s") == 0) {
-        /* Format is just "%s" so we use the string directly, this allows 
-           messages to be bigger than the maximal stack allocation size without 
-           the need for another heap allocation */
-        message = va_arg(ap, const char*);
-    } else {
-        /* Allocate a buffer on the stack and format the message into it */
-        size_t buffer_size = ucs_log_get_buffer_size();
-        char *buf          = ucs_alloca(buffer_size + 1);
-        buf[buffer_size]   = '\0';
-        vsnprintf(buf, buffer_size, format, ap);
-        message = buf;
-    }
+    message = UCS_LOG_FORMAT_MESSAGE(format, ap);
 
     if (ucs_unlikely(level <= ucs_global_opts.log_level_trigger)) {
         ucs_fatal_error_message(file, line, function, message);
     } else {
-        gettimeofday(&tv, NULL);
-        ucs_log_print(file, line, level, comp_conf, &tv, message);
+        ucs_log_print(file, line, level, comp_conf, message);
     }
 
     /* flush the log file if the log_level of this message is fatal or error */

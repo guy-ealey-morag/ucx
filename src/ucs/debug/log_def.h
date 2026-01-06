@@ -61,6 +61,16 @@ BEGIN_C_DECLS
         } \
     } while (0)
 
+/**
+ * Print an output level log message.
+ *
+ * This function is intended for printing user outputs with timestamp and 
+ * process information.
+ */
+#define ucs_output(_fmt, ...) \
+    do { \
+        ucs_log_print_output(_fmt, ##__VA_ARGS__); \
+    } while (0)
 
 /**
  * Print a message regardless of current log level. Output can be
@@ -74,7 +84,6 @@ BEGIN_C_DECLS
  * The function is intended for debugging only. It should not be used
  * in the real code.
  */
-
 #define ucs_print(_fmt, ...) \
     do { \
         if (ucs_global_opts.log_print_enable) { \
@@ -121,12 +130,22 @@ extern const char *ucs_log_category_names[];
  * @param [in] function   Function name which generated the log.
  * @param [in] level      Log level of the message.
  * @param [in] comp_conf  Component log config.
- * @param [in] message    Log format.
+ * @param [in] format     Log format.
  */
 void ucs_log_dispatch(const char *file, unsigned line, const char *function,
                       ucs_log_level_t level, ucs_log_component_config_t *comp_conf,
                       const char *format, ...)
     UCS_F_PRINTF(6, 7);
+
+
+/**
+ * Print an output level log message, regardless of current log level.
+ * Output logs are not dispatched to log handlers, and are printed directly to 
+ * the output stream.
+ *
+ * @param [in] format   Log format.
+ */
+void ucs_log_print_output(const char *format, ...) UCS_F_PRINTF(1, 2);
 
 
 /**
@@ -139,15 +158,6 @@ void ucs_log_flush(void);
  * @return Configured log buffer size
  */
 size_t ucs_log_get_buffer_size(void);
-
-
-/**
- * Print a compact log line (without file/line prefixes) to the log stream.
- *
- * @param [in] str   Log line to print.
- */
-void ucs_log_print_compact(const char *str);
-
 
 /**
  * Default log handler, which prints the message to the output configured in

@@ -257,6 +257,9 @@ void ucp_proto_select_elem_info(ucp_worker_h worker,
     }
     ucp_proto_table_row_separator(strb, col_width, 3);
 
+    /* Remove the trailing newline */
+    ucs_string_buffer_rtrim(strb, "\n");
+
     ucs_array_cleanup_dynamic(&table);
 }
 
@@ -1044,14 +1047,12 @@ void ucp_proto_select_elem_trace(ucp_worker_h worker,
                                  ucp_proto_select_elem_t *select_elem)
 {
     ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
-    char *line;
 
     /* Print human-readable protocol selection table to the log */
     ucp_proto_select_elem_info(worker, ep_cfg_index, rkey_cfg_index,
                                select_param, select_elem, 0, &strb);
-    ucs_string_buffer_for_each_token(line, &strb, "\n") {
-        ucs_log_print_compact(line);
-    }
+
+    ucs_output("%s", ucs_string_buffer_cstr(&strb));
 
     ucs_string_buffer_cleanup(&strb);
 }

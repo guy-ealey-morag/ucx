@@ -27,7 +27,8 @@ typedef enum {
     UCS_LOG_LEVEL_TRACE_FUNC,   /* Function calls */
     UCS_LOG_LEVEL_TRACE_POLL,   /* Polling functions */
     UCS_LOG_LEVEL_LAST,
-    UCS_LOG_LEVEL_PRINT         /* Temporary output */
+    UCS_LOG_LEVEL_PRINT,        /* Temporary output */
+    UCS_LOG_LEVEL_OUTPUT,       /* User output */
 } ucs_log_level_t;
 
 
