@@ -105,6 +105,7 @@ libucp_la_SOURCES = \
 	am/eager_single.c \
 	am/eager_multi.c \
 	am/rndv.c \
+	core/ucp_hw.c \
 	core/ucp_context.c \
 	core/ucp_am.c \
 	core/ucp_ep.c \

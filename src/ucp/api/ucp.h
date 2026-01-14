@@ -109,6 +109,15 @@ BEGIN_C_DECLS
  */
 
 
+ /**
+ * @defgroup UCP_HW UCP Hardware routines
+ * @ingroup UCP_API
+ * @{
+ * UCP Hardware routines
+ * @}
+ */
+
+
 /**
  * @ingroup UCP_CONTEXT
  * @brief UCP context parameters field mask.
@@ -4146,6 +4155,60 @@ typedef struct ucp_ep_attr {
  * @return Error code as defined by @ref ucs_status_t
  */
 ucs_status_t ucp_ep_query(ucp_ep_h ep, ucp_ep_attr_t *attr);
+
+/**
+ * @ingroup UCP_HW
+ * @brief UCP hardware attributes field mask.
+ *
+ * The enumeration allows specifying which fields in @ref ucp_hardware_attrs_t
+ * are present. It is used to enable backward compatibility support.
+ */
+enum ucp_hardware_attr_field {
+    UCP_HARDWARE_ATTR_FIELD_NUM_IB_DEVICES = UCS_BIT(0), /**< Number of IB devices */
+    UCP_HARDWARE_ATTR_FIELD_NUM_GPUS       = UCS_BIT(1)  /**< Number of GPUs */
+};
+
+
+/**
+ * @ingroup UCP_HW
+ * @brief Hardware attributes.
+ *
+ * The structure defines the hardware attributes discovered on the system.
+ */
+typedef struct ucp_hardware_attrs {
+    /**
+     * Mask of valid fields in this structure, using bits from
+     * @ref ucp_hardware_attr_field.
+     * Fields not specified in this mask will be ignored.
+     * Provides ABI compatibility with respect to adding new fields.
+     */
+    uint64_t              field_mask;
+
+    /**
+     * Number of usable InfiniBand devices.
+     */
+    unsigned              num_ib_devices;
+
+    /**
+     * Number of detected CUDA-capable GPUs.
+     */
+    unsigned              num_gpus;
+} ucp_hardware_attrs_t;
+
+
+/**
+ * @ingroup UCP_HW
+ * @brief Query hardware attributes.
+ *
+ * This routine fetches information about the hardware available on the system
+ * by scanning PCI devices.
+ *
+ * @param [out] attr       Filled with hardware attributes.
+ *
+ * @return Error code as defined by @ref ucs_status_t
+ */
+ucs_status_t
+ucp_hardware_query(ucp_hardware_attrs_t *attr);
 
 
 /**
