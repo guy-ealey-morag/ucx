@@ -19,6 +19,7 @@
 
 #define UCP_PCI_VENDOR_MELLANOX   0x15b3
 #define UCP_PCI_VENDOR_NVIDIA     0x10de
+#define UCP_PCI_VENDOR_AMD        0x1002
 
 #define UCP_PCI_CLASS_IB          0x0207
 #define UCP_PCI_CLASS_GPU_DISPLAY 0x0300
@@ -81,7 +82,8 @@ ucp_hardware_query_scan_cb(const struct dirent *entry, void *arg)
     }
 
     /* Check for GPU */
-    if ((vendor_id == UCP_PCI_VENDOR_NVIDIA) &&
+    if (((vendor_id == UCP_PCI_VENDOR_NVIDIA) ||
+         (vendor_id == UCP_PCI_VENDOR_AMD)) &&
         ((class_id == UCP_PCI_CLASS_GPU_DISPLAY) ||
          (class_id == UCP_PCI_CLASS_GPU_3D))) {
         ctx->num_gpus++;

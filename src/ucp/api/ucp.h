@@ -4190,7 +4190,7 @@ typedef struct ucp_hardware_attrs {
     unsigned              num_ib_devices;
 
     /**
-     * Number of detected CUDA-capable GPUs.
+     * Number of detected GPUs.
      */
     unsigned              num_gpus;
 } ucp_hardware_attrs_t;
