@@ -18,6 +18,9 @@ UCS_TEST_F(test_ucp_hardware_query, ib_devices_and_gpus) {
     status              = ucp_hardware_query(&hw_attrs);
     ASSERT_EQ(UCS_OK, status);
 
+    EXPECT_EQ(hw_attrs.hardware_support,
+              UCP_HARDWARE_SUPPORT_IB | UCP_HARDWARE_SUPPORT_CUDA);
+
     /* Verify that we found at least one device of each type */
     EXPECT_GT(hw_attrs.num_ib_devices, 0u);
     EXPECT_GT(hw_attrs.num_gpus, 0u);

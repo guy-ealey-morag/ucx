@@ -101,6 +101,16 @@ ucp_hardware_query(ucp_hardware_attrs_t *attr)
     ucp_hardware_query_ctx_t ctx = {0, 0};
     ucs_status_t status;
 
+    if (attr->field_mask & UCP_HARDWARE_ATTR_FIELD_HARDWARE_SUPPORT) {
+        attr->hardware_support = 0;
+#if HAVE_IB
+        attr->hardware_support |= UCP_HARDWARE_SUPPORT_IB;
+#endif
+#if HAVE_CUDA
+        attr->hardware_support |= UCP_HARDWARE_SUPPORT_CUDA;
+#endif
+    }
+
     status = ucs_sys_readdir(UCP_PCI_DEVICES_PATH, ucp_hardware_query_scan_cb,
                              &ctx);
     if (status != UCS_OK) {

@@ -4164,8 +4164,22 @@ ucs_status_t ucp_ep_query(ucp_ep_h ep, ucp_ep_attr_t *attr);
  * are present. It is used to enable backward compatibility support.
  */
 enum ucp_hardware_attr_field {
-    UCP_HARDWARE_ATTR_FIELD_NUM_IB_DEVICES = UCS_BIT(0), /**< Number of IB devices */
-    UCP_HARDWARE_ATTR_FIELD_NUM_GPUS       = UCS_BIT(1)  /**< Number of GPUs */
+    UCP_HARDWARE_ATTR_FIELD_HARDWARE_SUPPORT = UCS_BIT(0), /**< Hardware support mask */
+    UCP_HARDWARE_ATTR_FIELD_NUM_IB_DEVICES   = UCS_BIT(1), /**< Number of IB devices */
+    UCP_HARDWARE_ATTR_FIELD_NUM_GPUS         = UCS_BIT(2)  /**< Number of GPUs */
+};
+
+
+/**
+ * @ingroup UCP_HW
+ * @brief UCP hardware support flags.
+ *
+ * The enumeration defines flags indicating which hardware support is available
+ * in the UCX library build.
+ */
+enum ucp_hardware_support {
+    UCP_HARDWARE_SUPPORT_IB   = UCS_BIT(0), /**< InfiniBand support available */
+    UCP_HARDWARE_SUPPORT_CUDA = UCS_BIT(1)  /**< CUDA support available */
 };
 
 
@@ -4183,6 +4197,11 @@ typedef struct ucp_hardware_attrs {
      * Provides ABI compatibility with respect to adding new fields.
      */
     uint64_t              field_mask;
+
+    /**
+     * Mask of hardware support flags, using bits from @ref ucp_hardware_support.
+     */
+    uint64_t              hardware_support;
 
     /**
      * Number of usable InfiniBand devices.
