@@ -54,6 +54,25 @@
     UCS_LOG_TIME_ARG(_tv), UCS_LOG_PROC_DATA_ARG(), \
     UCS_LOG_METADATA_ARG(_short_file, _line, _level, _comp_conf)
 
+#define ucs_log_print_single_line(_valgrind_fmt, _valgrind_args, \
+                                  _file_fmt, _file_args,\
+                                  _stdout_fmt, _stdout_args, \
+                                  _message) \
+    do { \
+        if (RUNNING_ON_VALGRIND) { \
+            VALGRIND_PRINTF(_valgrind_fmt "%s\n", _valgrind_args, _message); \
+        } else if (ucs_log_initialized) { \
+            if (ucs_log_file_close) { /* non-stdout/stderr */ \
+                int log_entry_len = snprintf(NULL, 0, _file_fmt "%s\n", \
+                                             _file_args, _message); \
+                ucs_log_handle_file_max_size(log_entry_len); \
+            } \
+            fprintf(ucs_log_file, _file_fmt "%s\n", _file_args, _message); \
+        } else { \
+            fprintf(stdout, _stdout_fmt "%s\n", _stdout_args, _message); \
+        } \
+    } while (0)
+
 KHASH_MAP_INIT_STR(ucs_log_filter, char);
 
 const char *ucs_log_level_names[] = {
@@ -225,63 +244,6 @@ static void ucs_log_handle_file_max_size(int log_entry_len)
                            &next_token, NULL);
 }
 
-void ucs_log_print_compact(const char *str)
-{
-    struct timeval tv;
-
-    gettimeofday(&tv, NULL);
-
-    if (RUNNING_ON_VALGRIND) {
-        VALGRIND_PRINTF(UCS_LOG_TIME_FMT " %s\n", UCS_LOG_TIME_ARG(&tv), str);
-    } else if (ucs_log_initialized) {
-        if (ucs_log_file_close) { /* non-stdout/stderr */
-            ucs_log_handle_file_max_size(strlen(str) + 1);
-        }
-
-        fprintf(ucs_log_file, UCS_LOG_COMPACT_FMT " %s\n",
-                UCS_LOG_COMPACT_ARG(&tv), str);
-    } else {
-        fprintf(stdout, UCS_LOG_COMPACT_FMT " %s\n", UCS_LOG_COMPACT_ARG(&tv),
-                str);
-    }
-}
-
-static void
-ucs_log_print_single_line(const char *short_file, int line,
-                          ucs_log_level_t level,
-                          const ucs_log_component_config_t *comp_conf,
-                          const struct timeval *tv, const char *message)
-{
-    size_t buffer_size;
-    int log_entry_len;
-    char *log_buf;
-
-    if (RUNNING_ON_VALGRIND) {
-        buffer_size = ucs_log_get_buffer_size();
-        log_buf     = ucs_alloca(buffer_size + 1);
-        snprintf(log_buf, buffer_size, UCS_LOG_SHORT_FMT "%s\n",
-                 UCS_LOG_SHORT_ARG(short_file, line, level, comp_conf, tv),
-                 message);
-        VALGRIND_PRINTF("%s", log_buf);
-    } else if (ucs_log_initialized) {
-        if (ucs_log_file_close) { /* non-stdout/stderr */
-            /* get log entry size */
-            log_entry_len = snprintf(NULL, 0, UCS_LOG_FMT "%s\n",
-                                     UCS_LOG_ARG(short_file, line, level,
-                                                 comp_conf, tv),
-                                     message);
-            ucs_log_handle_file_max_size(log_entry_len);
-        }
-
-        fprintf(ucs_log_file, UCS_LOG_FMT "%s\n",
-                UCS_LOG_ARG(short_file, line, level, comp_conf, tv), message);
-    } else {
-        fprintf(stdout, UCS_LOG_SHORT_FMT "%s\n",
-                UCS_LOG_SHORT_ARG(short_file, line, level, comp_conf, tv),
-                message);
-    }
-}
-
 static void ucs_log_print_string(const char *str)
 {
     if (RUNNING_ON_VALGRIND) {
@@ -298,31 +260,15 @@ static void ucs_log_print_string(const char *str)
     }
 }
 
-static void
-ucs_log_print_multi_line(const char *short_file, int line,
-                         ucs_log_level_t level,
-                         const ucs_log_component_config_t *comp_conf,
-                         const struct timeval *tv, const char *message,
-                         const char *first_line_end)
+static void ucs_log_print_multi_line(const char *prefix, const char *message,
+                                     const char *first_line_end)
 {
     size_t output_len      = 0;
     const char *line_start = message;
     const char *line_end   = first_line_end;
-    char prefix[UCS_LOG_MULTILINE_PREFIX_SIZE];
     char output[UCS_LOG_MULTILINE_OUTPUT_SIZE];
     size_t remaining_space;
     int ret;
-
-    /* Format the log prefix once */
-    if (RUNNING_ON_VALGRIND || !ucs_log_initialized) {
-        ret = snprintf(prefix, sizeof(prefix), UCS_LOG_SHORT_FMT,
-                       UCS_LOG_SHORT_ARG(short_file, line, level, comp_conf,
-                                         tv));
-    } else {
-        ret = snprintf(prefix, sizeof(prefix), UCS_LOG_FMT,
-                       UCS_LOG_ARG(short_file, line, level, comp_conf, tv));
-    }
-    ucs_assertv((ret >= 0) && ((size_t)ret < sizeof(prefix)), "ret=%d", ret);
 
     /* Append line by line */
     ucs_assert(line_end != NULL);
@@ -374,13 +320,74 @@ static void ucs_log_print(const char *file, int line, ucs_log_level_t level,
 {
     const char *short_file     = ucs_basename(file);
     const char *first_line_end = strchr(message, '\n');
+    char *prefix;
+    int ret;
 
-    if (first_line_end != NULL) {
-        ucs_log_print_multi_line(short_file, line, level, comp_conf, tv,
-                                 message, first_line_end);
+    if (first_line_end == NULL) {
+        ucs_log_print_single_line(
+                UCS_LOG_SHORT_FMT,
+                UCS_LOG_SHORT_ARG(short_file, line, level, comp_conf, tv),
+                UCS_LOG_FMT,
+                UCS_LOG_ARG(short_file, line, level, comp_conf, tv),
+                UCS_LOG_SHORT_FMT,
+                UCS_LOG_SHORT_ARG(short_file, line, level, comp_conf, tv),
+                message);
     } else {
-        ucs_log_print_single_line(short_file, line, level, comp_conf, tv,
-                                  message);
+        prefix = ucs_alloca(UCS_LOG_MULTILINE_PREFIX_SIZE);
+
+        if (RUNNING_ON_VALGRIND || !ucs_log_initialized) {
+            ret = snprintf(
+                    prefix, UCS_LOG_MULTILINE_PREFIX_SIZE,
+                    UCS_LOG_SHORT_FMT,
+                    UCS_LOG_SHORT_ARG(short_file, line, level, comp_conf,tv));
+        } else {
+            ret = snprintf(
+                    prefix, UCS_LOG_MULTILINE_PREFIX_SIZE, 
+                    UCS_LOG_FMT,
+                    UCS_LOG_ARG(short_file, line, level, comp_conf, tv));
+        }
+        ucs_assertv((ret >= 0) && ((size_t)ret < UCS_LOG_MULTILINE_PREFIX_SIZE),
+                    "ret=%d", ret);
+
+        ucs_log_print_multi_line(prefix, message, first_line_end);
+    }
+}
+
+void ucs_log_print_compact(const char *message)
+{
+    const char *first_line_end;
+    struct timeval tv;
+    char *prefix;
+    int ret;
+
+    gettimeofday(&tv, NULL);
+    first_line_end = strchr(message, '\n');
+    
+    if (first_line_end == NULL) {
+        ucs_log_print_single_line(
+                UCS_LOG_TIME_FMT " ", 
+                UCS_LOG_TIME_ARG(&tv),
+                UCS_LOG_COMPACT_FMT " ",
+                UCS_LOG_COMPACT_ARG(&tv),
+                UCS_LOG_COMPACT_FMT " ",
+                UCS_LOG_COMPACT_ARG(&tv), 
+                message);
+    } else {
+        prefix = ucs_alloca(UCS_LOG_MULTILINE_PREFIX_SIZE);
+        
+        if (RUNNING_ON_VALGRIND) {
+            ret = snprintf(prefix, UCS_LOG_MULTILINE_PREFIX_SIZE,
+                           UCS_LOG_TIME_FMT " ", 
+                           UCS_LOG_TIME_ARG(&tv));
+        } else {
+            ret = snprintf(prefix, UCS_LOG_MULTILINE_PREFIX_SIZE, 
+                           UCS_LOG_COMPACT_FMT " ",
+                           UCS_LOG_COMPACT_ARG(&tv));
+        }
+        ucs_assertv((ret >= 0) && ((size_t)ret < UCS_LOG_MULTILINE_PREFIX_SIZE),
+                    "ret=%d", ret);
+
+        ucs_log_print_multi_line(prefix, message, first_line_end);
     }
 }
 
