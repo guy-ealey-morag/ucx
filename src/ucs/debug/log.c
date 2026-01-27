@@ -26,16 +26,16 @@
 #define UCS_MAX_LOG_HANDLERS          32
 #define UCS_LOG_MULTILINE_PREFIX_SIZE 256
 
-#define UCS_LOG_TIME_FMT        "[%lu.%06lu]"
-#define UCS_LOG_THREAD_NAME_FMT "[%s]"
-#define UCS_LOG_PROC_DATA_FMT   "[%s:%-5d:%s]"
+#define UCS_LOG_TIME_FMT        "[%lu.%06lu] "
+#define UCS_LOG_THREAD_NAME_FMT "[%s] "
+#define UCS_LOG_PROC_DATA_FMT   "[%s:%-5d:%s] "
 #define UCS_LOG_METADATA_FMT    "%17s:%-4u %-4s %-5s %*s"
 
-#define UCS_LOG_COMPACT_FMT UCS_LOG_TIME_FMT " " UCS_LOG_PROC_DATA_FMT "  "
+#define UCS_LOG_COMPACT_FMT UCS_LOG_TIME_FMT UCS_LOG_PROC_DATA_FMT " "
 #define UCS_LOG_SHORT_FMT \
-    UCS_LOG_TIME_FMT " " UCS_LOG_THREAD_NAME_FMT " " UCS_LOG_METADATA_FMT
+    UCS_LOG_TIME_FMT UCS_LOG_THREAD_NAME_FMT UCS_LOG_METADATA_FMT
 #define UCS_LOG_LONG_FMT \
-    UCS_LOG_TIME_FMT " " UCS_LOG_PROC_DATA_FMT " " UCS_LOG_METADATA_FMT
+    UCS_LOG_TIME_FMT UCS_LOG_PROC_DATA_FMT UCS_LOG_METADATA_FMT
 
 #define UCS_LOG_TIME_ARG(_tv)  (_tv)->tv_sec, (_tv)->tv_usec
 
@@ -48,8 +48,7 @@
 #define UCS_LOG_PROC_DATA_ARG() \
     ucs_log_hostname, ucs_log_get_pid(), ucs_log_get_thread_name()
 
-#define UCS_LOG_COMPACT_ARG(_tv)\
-    UCS_LOG_TIME_ARG(_tv), UCS_LOG_PROC_DATA_ARG()
+#define UCS_LOG_COMPACT_ARG(_tv) UCS_LOG_TIME_ARG(_tv), UCS_LOG_PROC_DATA_ARG()
 
 #define UCS_LOG_SHORT_ARG(_short_file, _line, _level, _comp_conf, _tv) \
     UCS_LOG_TIME_ARG(_tv), UCS_LOG_THREAD_NAME_ARG(), \
@@ -77,6 +76,8 @@
 typedef enum {
     UCS_LOG_FORMAT_LONG,
     UCS_LOG_FORMAT_SHORT,
+    UCS_LOG_FORMAT_COMPACT,
+    UCS_LOG_FORMAT_TIME,
     UCS_LOG_FORMAT_LAST,
 } ucs_log_format_t;
 
@@ -251,24 +252,38 @@ static void ucs_log_handle_file_max_size(int log_entry_len)
                            &next_token, NULL);
 }
 
-void ucs_log_print_compact(const char *str)
+static void
+ucs_log_print_multi_line(ucs_log_format_t prefix_format, const char *short_file,
+                         int line, ucs_log_level_t level,
+                         const ucs_log_component_config_t *comp_conf,
+                         const struct timeval *tv, const char *message,
+                         const char *first_line_end);
+
+void ucs_log_print_compact(const char *message)
 {
+    ucs_log_format_t prefix_format;
+    const char *first_line_end;
     struct timeval tv;
 
     gettimeofday(&tv, NULL);
 
-    if (RUNNING_ON_VALGRIND) {
-        VALGRIND_PRINTF(UCS_LOG_TIME_FMT " %s\n", UCS_LOG_TIME_ARG(&tv), str);
-    } else if (ucs_log_initialized) {
-        if (ucs_log_file_close) { /* non-stdout/stderr */
-            ucs_log_handle_file_max_size(strlen(str) + 1);
-        }
+    prefix_format = RUNNING_ON_VALGRIND ? UCS_LOG_FORMAT_TIME :
+                                          UCS_LOG_FORMAT_COMPACT;
 
-        fprintf(ucs_log_file, UCS_LOG_COMPACT_FMT " %s\n",
-                UCS_LOG_COMPACT_ARG(&tv), str);
+    first_line_end = strchr(message, '\n');
+
+    if (first_line_end == NULL) {
+        /* Single line message */
+        if (prefix_format == UCS_LOG_FORMAT_COMPACT) {
+            UCS_LOG_PRINTF(UCS_LOG_COMPACT_FMT "%s\n", UCS_LOG_COMPACT_ARG(&tv),
+                           message);
+        } else {
+            UCS_LOG_PRINTF(UCS_LOG_TIME_FMT "%s\n", UCS_LOG_TIME_ARG(&tv),
+                           message);
+        }
     } else {
-        fprintf(stdout, UCS_LOG_COMPACT_FMT " %s\n", UCS_LOG_COMPACT_ARG(&tv),
-                str);
+        ucs_log_print_multi_line(prefix_format, NULL, 0, 0, NULL, &tv, message,
+                                 first_line_end);
     }
 }
 
@@ -291,9 +306,15 @@ ucs_log_print_multi_line(ucs_log_format_t prefix_format, const char *short_file,
     if (prefix_format == UCS_LOG_FORMAT_LONG) {
         ret = snprintf(prefix, sizeof(prefix), UCS_LOG_LONG_FMT,
                        UCS_LOG_LONG_ARG(short_file, line, level, comp_conf, tv));
-    } else {
+    } else if (prefix_format == UCS_LOG_FORMAT_SHORT) {
         ret = snprintf(prefix, sizeof(prefix), UCS_LOG_SHORT_FMT,
                        UCS_LOG_SHORT_ARG(short_file, line, level, comp_conf, tv));
+    } else if (prefix_format == UCS_LOG_FORMAT_COMPACT) {
+        ret = snprintf(prefix, sizeof(prefix), UCS_LOG_COMPACT_FMT,
+                       UCS_LOG_COMPACT_ARG(tv));
+    } else {
+        ret = snprintf(prefix, sizeof(prefix), UCS_LOG_TIME_FMT,
+                       UCS_LOG_TIME_ARG(tv));
     }
     ucs_assertv((ret >= 0) && ((size_t)ret < sizeof(prefix)), "ret=%d", ret);
 
