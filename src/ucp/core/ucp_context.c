@@ -2507,6 +2507,8 @@ ucp_version_check(unsigned api_major_version, unsigned api_minor_version)
     }
 }
 
+static void ucp_context_log_tl_info(ucp_context_h context);
+
 ucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_version,
                               const ucp_params_t *params, const ucp_config_t *config,
                               ucp_context_h *context_p)
@@ -2580,6 +2582,7 @@ ucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_ver
               " tl bitmap " UCT_TL_BITMAP_FMT,
               context->name, context, context->num_mds, context->num_tls,
               context->config.features, UCT_TL_BITMAP_ARG(&context->tl_bitmap));
+    ucp_context_log_tl_info(context);
 
     *context_p = context;
     return UCS_OK;
@@ -2694,6 +2697,247 @@ ucs_status_t ucp_context_query(ucp_context_h context, ucp_context_attr_t *attr)
     }
 
     return UCS_OK;
+}
+
+#define UCP_TL_INFO_DASHES \
+    "------------------------------------------------------------------------" \
+    "----------------------------"
+#define UCP_TL_INFO_DEVS_PER_LINE 3
+
+typedef struct {
+    uct_tl_resource_desc_t rsc;
+    int                    enabled;
+} ucp_tl_info_entry_t;
+
+static int ucp_tl_rsc_is_enabled(ucp_context_h context,
+                                  const uct_tl_resource_desc_t *rsc)
+{
+    ucp_rsc_index_t i;
+
+    for (i = 0; i < context->num_tls; ++i) {
+        if ((context->tl_rscs[i].tl_rsc.dev_type == rsc->dev_type) &&
+            (strcmp(context->tl_rscs[i].tl_rsc.tl_name, rsc->tl_name) == 0) &&
+            (strcmp(context->tl_rscs[i].tl_rsc.dev_name, rsc->dev_name) == 0)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int ucp_tl_info_is_same_group(const ucp_tl_info_entry_t *entries,
+                                     unsigned a, unsigned b)
+{
+    return (entries[a].rsc.dev_type == entries[b].rsc.dev_type) &&
+           (entries[a].enabled == entries[b].enabled) &&
+           (strcmp(entries[a].rsc.tl_name, entries[b].rsc.tl_name) == 0);
+}
+
+static void ucp_context_log_tl_info(ucp_context_h context)
+{
+    ucp_tl_info_entry_t *all_rscs, *tmp_rscs;
+    uct_tl_resource_desc_t *tl_resources;
+    unsigned num_all_rscs, num_tl_resources, i, j;
+    uct_device_type_t dev_type;
+    ucp_md_index_t md_index;
+    ucs_status_t status;
+    size_t tl_width, dev_width, type_width, stat_width, len, line_width;
+    int first_type, first_tl, already_seen, dev_count;
+    char dev_buf[256];
+    size_t dev_buf_len;
+    const char *stat_str;
+
+    all_rscs     = NULL;
+    num_all_rscs = 0;
+    for (md_index = 0; md_index < context->num_mds; ++md_index) {
+        status = uct_md_query_tl_resources(context->tl_mds[md_index].md,
+                                           &tl_resources, &num_tl_resources);
+        if (status != UCS_OK) {
+            continue;
+        }
+        tmp_rscs = ucs_realloc(all_rscs,
+                               sizeof(*all_rscs) *
+                                       (num_all_rscs + num_tl_resources),
+                               "tl info");
+        if (tmp_rscs == NULL) {
+            uct_release_tl_resource_list(tl_resources);
+            break;
+        }
+        all_rscs = tmp_rscs;
+        for (i = 0; i < num_tl_resources; ++i) {
+            all_rscs[num_all_rscs].rsc     = tl_resources[i];
+            all_rscs[num_all_rscs].enabled = ucp_tl_rsc_is_enabled(
+                    context, &tl_resources[i]);
+            num_all_rscs++;
+        }
+        uct_release_tl_resource_list(tl_resources);
+    }
+
+    if (num_all_rscs == 0) {
+        ucs_info("no available transports");
+        ucs_free(all_rscs);
+        return;
+    }
+
+    tl_width   = strlen("Transport");
+    dev_width  = strlen("Device");
+    type_width = strlen("Type");
+    stat_width = strlen("disabled");
+
+    for (i = 0; i < num_all_rscs; ++i) {
+        len = strlen(all_rscs[i].rsc.tl_name);
+        if (len > tl_width) {
+            tl_width = len;
+        }
+        len = strlen(uct_device_type_names[all_rscs[i].rsc.dev_type]);
+        if (len > type_width) {
+            type_width = len;
+        }
+    }
+
+    for (dev_type = UCT_DEVICE_TYPE_NET; dev_type < UCT_DEVICE_TYPE_LAST;
+         ++dev_type) {
+        for (i = 0; i < num_all_rscs; ++i) {
+            if (all_rscs[i].rsc.dev_type != dev_type) {
+                continue;
+            }
+            already_seen = 0;
+            for (j = 0; j < i; ++j) {
+                if (ucp_tl_info_is_same_group(all_rscs, j, i)) {
+                    already_seen = 1;
+                    break;
+                }
+            }
+            if (already_seen) {
+                continue;
+            }
+
+            line_width = 0;
+            dev_count  = 0;
+            for (j = i; j < num_all_rscs; ++j) {
+                if (!ucp_tl_info_is_same_group(all_rscs, j, i)) {
+                    continue;
+                }
+                if ((dev_count > 0) &&
+                    (dev_count % UCP_TL_INFO_DEVS_PER_LINE == 0)) {
+                    if (line_width > dev_width) {
+                        dev_width = line_width;
+                    }
+                    line_width = 0;
+                }
+                if (dev_count % UCP_TL_INFO_DEVS_PER_LINE > 0) {
+                    line_width += 2;
+                }
+                line_width += strlen(all_rscs[j].rsc.dev_name);
+                dev_count++;
+            }
+            if (line_width > dev_width) {
+                dev_width = line_width;
+            }
+        }
+    }
+
+    ucs_info("available transports and devices:");
+    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
+             (int)type_width, UCP_TL_INFO_DASHES,
+             (int)tl_width,   UCP_TL_INFO_DASHES,
+             (int)stat_width, UCP_TL_INFO_DASHES,
+             (int)dev_width,  UCP_TL_INFO_DASHES);
+    ucs_info("| %-*s | %-*s | %-*s | %-*s |",
+             (int)type_width, "Type",
+             (int)tl_width,   "Transport",
+             (int)stat_width, "Status",
+             (int)dev_width,  "Device");
+    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
+             (int)type_width, UCP_TL_INFO_DASHES,
+             (int)tl_width,   UCP_TL_INFO_DASHES,
+             (int)stat_width, UCP_TL_INFO_DASHES,
+             (int)dev_width,  UCP_TL_INFO_DASHES);
+
+    for (dev_type = UCT_DEVICE_TYPE_NET; dev_type < UCT_DEVICE_TYPE_LAST;
+         ++dev_type) {
+        first_type = 1;
+        for (i = 0; i < num_all_rscs; ++i) {
+            if (all_rscs[i].rsc.dev_type != dev_type) {
+                continue;
+            }
+            already_seen = 0;
+            for (j = 0; j < i; ++j) {
+                if (ucp_tl_info_is_same_group(all_rscs, j, i)) {
+                    already_seen = 1;
+                    break;
+                }
+            }
+            if (already_seen) {
+                continue;
+            }
+
+            if (first_type && (dev_type != UCT_DEVICE_TYPE_NET)) {
+                ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
+                         (int)type_width, UCP_TL_INFO_DASHES,
+                         (int)tl_width,   UCP_TL_INFO_DASHES,
+                         (int)stat_width, UCP_TL_INFO_DASHES,
+                         (int)dev_width,  UCP_TL_INFO_DASHES);
+            }
+
+            stat_str    = all_rscs[i].enabled ? "enabled" : "disabled";
+            first_tl    = 1;
+            dev_count   = 0;
+            dev_buf[0]  = '\0';
+            dev_buf_len = 0;
+            for (j = i; j < num_all_rscs; ++j) {
+                if (!ucp_tl_info_is_same_group(all_rscs, j, i)) {
+                    continue;
+                }
+
+                if ((dev_count > 0) &&
+                    (dev_count % UCP_TL_INFO_DEVS_PER_LINE == 0)) {
+                    ucs_info("| %-*s | %-*s | %-*s | %-*s |",
+                             (int)type_width,
+                             first_type ? uct_device_type_names[dev_type] : "",
+                             (int)tl_width,
+                             first_tl ? all_rscs[i].rsc.tl_name : "",
+                             (int)stat_width,
+                             first_tl ? stat_str : "",
+                             (int)dev_width, dev_buf);
+                    first_tl    = 0;
+                    first_type  = 0;
+                    dev_buf[0]  = '\0';
+                    dev_buf_len = 0;
+                }
+
+                if (dev_count % UCP_TL_INFO_DEVS_PER_LINE > 0) {
+                    dev_buf_len += snprintf(dev_buf + dev_buf_len,
+                                           sizeof(dev_buf) - dev_buf_len,
+                                           ", ");
+                }
+                dev_buf_len += snprintf(dev_buf + dev_buf_len,
+                                        sizeof(dev_buf) - dev_buf_len, "%s",
+                                        all_rscs[j].rsc.dev_name);
+                dev_count++;
+            }
+
+            if (dev_buf[0] != '\0') {
+                ucs_info("| %-*s | %-*s | %-*s | %-*s |",
+                         (int)type_width,
+                         first_type ? uct_device_type_names[dev_type] : "",
+                         (int)tl_width,
+                         first_tl ? all_rscs[i].rsc.tl_name : "",
+                         (int)stat_width,
+                         first_tl ? stat_str : "",
+                         (int)dev_width, dev_buf);
+                first_tl   = 0;
+                first_type = 0;
+            }
+        }
+    }
+
+    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
+             (int)type_width, UCP_TL_INFO_DASHES,
+             (int)tl_width,   UCP_TL_INFO_DASHES,
+             (int)stat_width, UCP_TL_INFO_DASHES,
+             (int)dev_width,  UCP_TL_INFO_DASHES);
+
+    ucs_free(all_rscs);
 }
 
 void ucp_context_print_info(ucp_context_h context, FILE *stream)
