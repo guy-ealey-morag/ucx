@@ -19,17 +19,33 @@
 #define UCP_TL_INFO_DASHES \
     "------------------------------------------------------------------------" \
     "------------------------------------------------------------------------"
-#define UCP_TL_INFO_DEVS_PER_LINE 3
+#define UCP_TL_INFO_DEVS_PER_LINE  3
 /* Visual width of the UTF-8 check/cross mark characters (2 display columns) */
-#define UCP_TL_INFO_MARK_VISUAL   2
+#define UCP_TL_INFO_MARK_VISUAL    2
 /* Extra bytes that UTF-8 marks occupy beyond their visual width */
-#define UCP_TL_INFO_MARK_EXTRA    2
+#define UCP_TL_INFO_MARK_EXTRA     2
+#define UCP_TL_INFO_MARK_ENABLED   "\xe2\x9c\x93" /* ✓ */
+#define UCP_TL_INFO_MARK_DISABLED  "\xe2\x9c\x97" /* ✗ */
+#define UCP_TL_INFO_ROW_FMT        "| %-*s | %-*s | %-*s | %-*s |"
 
 static int ucp_tl_info_is_same_group(const ucp_tl_info_entry_t *entries,
                                      unsigned a, unsigned b)
 {
     return (entries[a].cmpt_index == entries[b].cmpt_index) &&
            (strcmp(entries[a].rsc.tl_name, entries[b].rsc.tl_name) == 0);
+}
+
+static int ucp_tl_info_is_group_leader(const ucp_tl_info_entry_t *entries,
+                                       unsigned idx)
+{
+    unsigned j;
+
+    for (j = 0; j < idx; ++j) {
+        if (ucp_tl_info_is_same_group(entries, j, idx)) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 void ucp_context_log_tl_info(ucp_context_h context,
@@ -41,7 +57,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
     unsigned i, j;
     size_t type_width, tl_width, dev_width, cmpt_width, len, line_width;
     int printed_any, first_type, first_cmpt, first_tl;
-    int already_seen, dev_count, line_marks;
+    int dev_count, line_marks;
     int has_rscs, tl_enabled, tl_has_mark;
     char dev_buf[512];
     char tl_buf[UCT_TL_NAME_MAX + 8];
@@ -76,17 +92,8 @@ void ucp_context_log_tl_info(ucp_context_h context,
 
     for (cmpt_idx = 0; cmpt_idx < context->num_cmpts; ++cmpt_idx) {
         for (i = 0; i < num_all_rscs; ++i) {
-            if (all_rscs[i].cmpt_index != cmpt_idx) {
-                continue;
-            }
-            already_seen = 0;
-            for (j = 0; j < i; ++j) {
-                if (ucp_tl_info_is_same_group(all_rscs, j, i)) {
-                    already_seen = 1;
-                    break;
-                }
-            }
-            if (already_seen) {
+            if ((all_rscs[i].cmpt_index != cmpt_idx) ||
+                !ucp_tl_info_is_group_leader(all_rscs, i)) {
                 continue;
             }
 
@@ -122,25 +129,28 @@ void ucp_context_log_tl_info(ucp_context_h context,
         }
     }
 
+/*
+ * Scoped macro: emits a 4-column separator line using the local
+ * column-width variables. Defined here and #undef'd at end of function.
+ */
+#define UCP_TL_INFO_LOG_SEP() \
+    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+", \
+             (int)type_width, UCP_TL_INFO_DASHES, \
+             (int)cmpt_width, UCP_TL_INFO_DASHES, \
+             (int)tl_width, UCP_TL_INFO_DASHES, \
+             (int)dev_width, UCP_TL_INFO_DASHES)
+
     ucs_info("+-%.*s-+",
              (int)(type_width + cmpt_width + tl_width + dev_width + 9),
              UCP_TL_INFO_DASHES);
     ucs_info("| %-*s |",
              (int)(type_width + cmpt_width + tl_width + dev_width + 9),
              "Available Transports and Devices");
-    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
-             (int)type_width, UCP_TL_INFO_DASHES,
-             (int)cmpt_width, UCP_TL_INFO_DASHES,
-             (int)tl_width, UCP_TL_INFO_DASHES,
-             (int)dev_width, UCP_TL_INFO_DASHES);
-    ucs_info("| %-*s | %-*s | %-*s | %-*s |", (int)type_width, "Type",
+    UCP_TL_INFO_LOG_SEP();
+    ucs_info(UCP_TL_INFO_ROW_FMT, (int)type_width, "Type",
              (int)cmpt_width, "Component", (int)tl_width, "Transport",
              (int)dev_width, "Device (System device)");
-    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
-             (int)type_width, UCP_TL_INFO_DASHES,
-             (int)cmpt_width, UCP_TL_INFO_DASHES,
-             (int)tl_width, UCP_TL_INFO_DASHES,
-             (int)dev_width, UCP_TL_INFO_DASHES);
+    UCP_TL_INFO_LOG_SEP();
 
     printed_any = 0;
     for (dev_type = UCT_DEVICE_TYPE_NET; dev_type < UCT_DEVICE_TYPE_LAST;
@@ -160,27 +170,14 @@ void ucp_context_log_tl_info(ucp_context_h context,
 
             first_cmpt = 1;
             for (i = 0; i < num_all_rscs; ++i) {
-                if (all_rscs[i].cmpt_index != cmpt_idx) {
-                    continue;
-                }
-                already_seen = 0;
-                for (j = 0; j < i; ++j) {
-                    if (ucp_tl_info_is_same_group(all_rscs, j, i)) {
-                        already_seen = 1;
-                        break;
-                    }
-                }
-                if (already_seen) {
+                if ((all_rscs[i].cmpt_index != cmpt_idx) ||
+                    !ucp_tl_info_is_group_leader(all_rscs, i)) {
                     continue;
                 }
 
                 if (first_cmpt && printed_any) {
                     if (first_type) {
-                        ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
-                                 (int)type_width, UCP_TL_INFO_DASHES,
-                                 (int)cmpt_width, UCP_TL_INFO_DASHES,
-                                 (int)tl_width, UCP_TL_INFO_DASHES,
-                                 (int)dev_width, UCP_TL_INFO_DASHES);
+                        UCP_TL_INFO_LOG_SEP();
                     } else {
                         ucs_info("| %-*s +-%.*s-+-%.*s-+-%.*s-+",
                                  (int)type_width, "",
@@ -200,7 +197,8 @@ void ucp_context_log_tl_info(ucp_context_h context,
                 }
 
                 snprintf(tl_buf, sizeof(tl_buf), "%s %s",
-                         tl_enabled ? "\xe2\x9c\x93" : "\xe2\x9c\x97",
+                         tl_enabled ? UCP_TL_INFO_MARK_ENABLED :
+                                      UCP_TL_INFO_MARK_DISABLED,
                          all_rscs[i].rsc.tl_name);
 
                 first_tl    = 1;
@@ -216,7 +214,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
                     if ((dev_count > 0) &&
                         (dev_count % UCP_TL_INFO_DEVS_PER_LINE == 0)) {
                         tl_has_mark = first_tl ? 1 : 0;
-                        ucs_info("| %-*s | %-*s | %-*s | %-*s |",
+                        ucs_info(UCP_TL_INFO_ROW_FMT,
                                  (int)type_width,
                                  first_type ?
                                          uct_device_type_names[dev_type] : "",
@@ -252,8 +250,8 @@ void ucp_context_log_tl_info(ucp_context_h context,
                         dev_buf_len += snprintf(
                                 dev_buf + dev_buf_len,
                                 sizeof(dev_buf) - dev_buf_len, "%s %s (%s)",
-                                all_rscs[j].enabled ? "\xe2\x9c\x93" :
-                                                      "\xe2\x9c\x97",
+                                all_rscs[j].enabled ? UCP_TL_INFO_MARK_ENABLED :
+                                                      UCP_TL_INFO_MARK_DISABLED,
                                 all_rscs[j].rsc.dev_name,
                                 ucs_topo_sys_device_get_name(
                                         all_rscs[j].rsc.sys_device));
@@ -262,8 +260,8 @@ void ucp_context_log_tl_info(ucp_context_h context,
                                                 sizeof(dev_buf) - dev_buf_len,
                                                 "%s %s",
                                                 all_rscs[j].enabled ?
-                                                        "\xe2\x9c\x93" :
-                                                        "\xe2\x9c\x97",
+                                                        UCP_TL_INFO_MARK_ENABLED :
+                                                        UCP_TL_INFO_MARK_DISABLED,
                                                 all_rscs[j].rsc.dev_name);
                     }
                     if (dev_buf_len >= sizeof(dev_buf)) {
@@ -275,7 +273,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
 
                 if (dev_buf[0] != '\0') {
                     tl_has_mark = first_tl ? 1 : 0;
-                    ucs_info("| %-*s | %-*s | %-*s | %-*s |",
+                    ucs_info(UCP_TL_INFO_ROW_FMT,
                              (int)type_width,
                              first_type ?
                                      uct_device_type_names[dev_type] : "",
@@ -308,13 +306,9 @@ void ucp_context_log_tl_info(ucp_context_h context,
         }
         if (!has_rscs) {
             if (printed_any) {
-                ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
-                         (int)type_width, UCP_TL_INFO_DASHES,
-                         (int)cmpt_width, UCP_TL_INFO_DASHES,
-                         (int)tl_width, UCP_TL_INFO_DASHES,
-                         (int)dev_width, UCP_TL_INFO_DASHES);
+                UCP_TL_INFO_LOG_SEP();
             }
-            ucs_info("| %-*s | %-*s | %-*s | %-*s |",
+            ucs_info(UCP_TL_INFO_ROW_FMT,
                      (int)type_width, "<unavailable>",
                      (int)cmpt_width,
                      context->tl_cmpts[cmpt_idx].attr.name,
@@ -324,9 +318,6 @@ void ucp_context_log_tl_info(ucp_context_h context,
         }
     }
 
-    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
-             (int)type_width, UCP_TL_INFO_DASHES,
-             (int)cmpt_width, UCP_TL_INFO_DASHES,
-             (int)tl_width, UCP_TL_INFO_DASHES,
-             (int)dev_width, UCP_TL_INFO_DASHES);
+    UCP_TL_INFO_LOG_SEP();
+#undef UCP_TL_INFO_LOG_SEP
 }
