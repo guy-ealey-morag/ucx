@@ -2753,7 +2753,7 @@ ucs_status_t ucp_context_query(ucp_context_h context, ucp_context_attr_t *attr)
 
 #define UCP_TL_INFO_DASHES \
     "------------------------------------------------------------------------" \
-    "----------------------------"
+    "------------------------------------------------------------------------"
 #define UCP_TL_INFO_DEVS_PER_LINE 3
 #define UCP_TL_INFO_MARK_VISUAL   2
 #define UCP_TL_INFO_MARK_EXTRA    2
@@ -2855,7 +2855,12 @@ static void ucp_context_log_tl_info(ucp_context_h context,
         }
     }
 
-    ucs_info("available transports and devices:");
+    ucs_info("+-%.*s-+",
+             (int)(type_width + cmpt_width + tl_width + dev_width + 9),
+             UCP_TL_INFO_DASHES);
+    ucs_info("| %-*s |",
+             (int)(type_width + cmpt_width + tl_width + dev_width + 9),
+             "Available Transports and Devices");
     ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
              (int)type_width, UCP_TL_INFO_DASHES,
              (int)cmpt_width, UCP_TL_INFO_DASHES,
