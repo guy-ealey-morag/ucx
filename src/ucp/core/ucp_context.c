@@ -1754,13 +1754,6 @@ static ucs_status_t ucp_add_component_resources(
         md_index = context->num_mds;
         md_attr  = &context->tl_mds[md_index].attr;
 
-        /* TODO: Remove once gga hardware is available for testing */
-#if 0
-        if (strcmp(context->tl_cmpts[cmpt_index].attr.name, "gga") == 0) {
-            continue;
-        }
-#endif
-
         status = ucp_fill_tl_md(context, cmpt_index,
                                 &uct_component_attr.md_resources[i],
                                 &context->tl_mds[md_index]);

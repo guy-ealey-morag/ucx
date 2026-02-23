@@ -155,7 +155,7 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
                              ucp_ep_h ep)
 {
     ucp_context_h context = worker->context;
-    ucp_lane_index_t lane, j, k;
+    ucp_lane_index_t lane, j;
     ucp_lane_type_mask_t types_union;
     size_t tl_width, dev_width, count_width, types_width;
     size_t len, total_width;
@@ -163,7 +163,7 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
     char title_buf[96];
     char types_buf[128];
     char dev_buf[128];
-    int count, first_tl, printed_any, j_is_leader;
+    int count, first_tl, printed_any;
 
     if (!ucs_log_is_enabled(UCS_LOG_LEVEL_INFO)) {
         return;
@@ -247,14 +247,7 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
 
         first_tl = 1;
         for (j = 0; j < lane; ++j) {
-            j_is_leader = 1;
-            for (k = 0; k < j; ++k) {
-                if (ucp_ep_lane_is_same_dev(key, k, j)) {
-                    j_is_leader = 0;
-                    break;
-                }
-            }
-            if (!j_is_leader) {
+            if (!ucp_ep_lane_is_dev_leader(key, j)) {
                 continue;
             }
             if (ucp_ep_lane_is_same_tl(key, context, cm_index, j, lane)) {
