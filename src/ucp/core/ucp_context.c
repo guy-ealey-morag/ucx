@@ -1757,7 +1757,7 @@ static ucs_status_t ucp_add_component_resources(
         md_attr  = &context->tl_mds[md_index].attr;
 
         /* TEMP: simulate missing IB hardware */
-        if (strcmp(context->tl_cmpts[cmpt_index].attr.name, "ib") == 0) {
+        if (strcmp(context->tl_cmpts[cmpt_index].attr.name, "gga") == 0) {
             continue;
         }
 
@@ -2770,17 +2770,28 @@ static void ucp_context_log_tl_info(ucp_context_h context,
                                     unsigned num_all_rscs)
 {
     ucp_rsc_index_t cmpt_idx;
+    uct_device_type_t dev_type, cmpt_dev_type;
     unsigned i, j;
-    size_t tl_width, dev_width, cmpt_width, len, line_width;
-    int printed_any, first_cmpt, first_tl, already_seen, dev_count, line_marks;
+    size_t type_width, tl_width, dev_width, cmpt_width, len, line_width;
+    int printed_any, first_type, first_cmpt, first_tl;
+    int already_seen, dev_count, line_marks;
     int has_rscs, tl_enabled, tl_has_mark;
     char dev_buf[512];
     char tl_buf[UCT_TL_NAME_MAX + 8];
     size_t dev_buf_len;
 
-    tl_width   = ucs_max(strlen("Transport"), strlen("<unavailable>"));
-    dev_width  = strlen("Device");
+    type_width = ucs_max(strlen("Type"), strlen("<unavailable>"));
+    tl_width   = strlen("Transports");
+    dev_width  = strlen("Devices");
     cmpt_width = strlen("Component");
+
+    for (dev_type = UCT_DEVICE_TYPE_NET; dev_type < UCT_DEVICE_TYPE_LAST;
+         ++dev_type) {
+        len = strlen(uct_device_type_names[dev_type]);
+        if (len > type_width) {
+            type_width = len;
+        }
+    }
 
     for (i = 0; i < num_all_rscs; ++i) {
         len = UCP_TL_INFO_MARK_VISUAL + strlen(all_rscs[i].rsc.tl_name);
@@ -2839,66 +2850,141 @@ static void ucp_context_log_tl_info(ucp_context_h context,
     }
 
     ucs_info("available transports and devices:");
-    ucs_info("+-%.*s-+-%.*s-+-%.*s-+", (int)cmpt_width, UCP_TL_INFO_DASHES,
-             (int)tl_width, UCP_TL_INFO_DASHES, (int)dev_width,
-             UCP_TL_INFO_DASHES);
-    ucs_info("| %-*s | %-*s | %-*s |", (int)cmpt_width, "Component",
-             (int)tl_width, "Transport", (int)dev_width, "Device");
-    ucs_info("+-%.*s-+-%.*s-+-%.*s-+", (int)cmpt_width, UCP_TL_INFO_DASHES,
-             (int)tl_width, UCP_TL_INFO_DASHES, (int)dev_width,
-             UCP_TL_INFO_DASHES);
+    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
+             (int)type_width, UCP_TL_INFO_DASHES,
+             (int)cmpt_width, UCP_TL_INFO_DASHES,
+             (int)tl_width, UCP_TL_INFO_DASHES,
+             (int)dev_width, UCP_TL_INFO_DASHES);
+    ucs_info("| %-*s | %-*s | %-*s | %-*s |",
+             (int)type_width, "Type",
+             (int)cmpt_width, "Component",
+             (int)tl_width, "Transports",
+             (int)dev_width, "Devices");
+    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
+             (int)type_width, UCP_TL_INFO_DASHES,
+             (int)cmpt_width, UCP_TL_INFO_DASHES,
+             (int)tl_width, UCP_TL_INFO_DASHES,
+             (int)dev_width, UCP_TL_INFO_DASHES);
 
     printed_any = 0;
-    for (cmpt_idx = 0; cmpt_idx < context->num_cmpts; ++cmpt_idx) {
-        first_cmpt = 1;
-        for (i = 0; i < num_all_rscs; ++i) {
-            if (all_rscs[i].cmpt_index != cmpt_idx) {
-                continue;
-            }
-            already_seen = 0;
-            for (j = 0; j < i; ++j) {
-                if (ucp_tl_info_is_same_group(all_rscs, j, i)) {
-                    already_seen = 1;
+    for (dev_type = UCT_DEVICE_TYPE_NET; dev_type < UCT_DEVICE_TYPE_LAST;
+         ++dev_type) {
+        first_type = 1;
+        for (cmpt_idx = 0; cmpt_idx < context->num_cmpts; ++cmpt_idx) {
+            cmpt_dev_type = UCT_DEVICE_TYPE_LAST;
+            for (i = 0; i < num_all_rscs; ++i) {
+                if (all_rscs[i].cmpt_index == cmpt_idx) {
+                    cmpt_dev_type = all_rscs[i].rsc.dev_type;
                     break;
                 }
             }
-            if (already_seen) {
+            if (cmpt_dev_type != dev_type) {
                 continue;
             }
 
-            if (first_cmpt && printed_any) {
-                ucs_info("+-%.*s-+-%.*s-+-%.*s-+", (int)cmpt_width,
-                         UCP_TL_INFO_DASHES, (int)tl_width, UCP_TL_INFO_DASHES,
-                         (int)dev_width, UCP_TL_INFO_DASHES);
-            }
-
-            tl_enabled = 0;
-            for (j = i; j < num_all_rscs; ++j) {
-                if (ucp_tl_info_is_same_group(all_rscs, j, i) &&
-                    all_rscs[j].enabled) {
-                    tl_enabled = 1;
-                    break;
+            first_cmpt = 1;
+            for (i = 0; i < num_all_rscs; ++i) {
+                if (all_rscs[i].cmpt_index != cmpt_idx) {
+                    continue;
                 }
-            }
-
-            snprintf(tl_buf, sizeof(tl_buf), "%s %s",
-                     tl_enabled ? "\xe2\x9c\x93" : "\xe2\x9c\x97",
-                     all_rscs[i].rsc.tl_name);
-
-            first_tl    = 1;
-            dev_count   = 0;
-            line_marks  = 0;
-            dev_buf[0]  = '\0';
-            dev_buf_len = 0;
-            for (j = i; j < num_all_rscs; ++j) {
-                if (!ucp_tl_info_is_same_group(all_rscs, j, i)) {
+                already_seen = 0;
+                for (j = 0; j < i; ++j) {
+                    if (ucp_tl_info_is_same_group(all_rscs, j, i)) {
+                        already_seen = 1;
+                        break;
+                    }
+                }
+                if (already_seen) {
                     continue;
                 }
 
-                if ((dev_count > 0) &&
-                    (dev_count % UCP_TL_INFO_DEVS_PER_LINE == 0)) {
+                if (first_cmpt && printed_any) {
+                    if (first_type) {
+                        ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
+                                 (int)type_width, UCP_TL_INFO_DASHES,
+                                 (int)cmpt_width, UCP_TL_INFO_DASHES,
+                                 (int)tl_width, UCP_TL_INFO_DASHES,
+                                 (int)dev_width, UCP_TL_INFO_DASHES);
+                    } else {
+                        ucs_info("| %-*s +-%.*s-+-%.*s-+-%.*s-+",
+                                 (int)type_width, "",
+                                 (int)cmpt_width, UCP_TL_INFO_DASHES,
+                                 (int)tl_width, UCP_TL_INFO_DASHES,
+                                 (int)dev_width, UCP_TL_INFO_DASHES);
+                    }
+                }
+
+                tl_enabled = 0;
+                for (j = i; j < num_all_rscs; ++j) {
+                    if (ucp_tl_info_is_same_group(all_rscs, j, i) &&
+                        all_rscs[j].enabled) {
+                        tl_enabled = 1;
+                        break;
+                    }
+                }
+
+                snprintf(tl_buf, sizeof(tl_buf), "%s %s",
+                         tl_enabled ? "\xe2\x9c\x93" : "\xe2\x9c\x97",
+                         all_rscs[i].rsc.tl_name);
+
+                first_tl    = 1;
+                dev_count   = 0;
+                line_marks  = 0;
+                dev_buf[0]  = '\0';
+                dev_buf_len = 0;
+                for (j = i; j < num_all_rscs; ++j) {
+                    if (!ucp_tl_info_is_same_group(all_rscs, j, i)) {
+                        continue;
+                    }
+
+                    if ((dev_count > 0) &&
+                        (dev_count % UCP_TL_INFO_DEVS_PER_LINE == 0)) {
+                        tl_has_mark = first_tl ? 1 : 0;
+                        ucs_info("| %-*s | %-*s | %-*s | %-*s |",
+                                 (int)type_width,
+                                 first_type ?
+                                         uct_device_type_names[dev_type] : "",
+                                 (int)cmpt_width,
+                                 first_cmpt ?
+                                         context->tl_cmpts[cmpt_idx].attr.name :
+                                         "",
+                                 (int)(tl_width +
+                                       tl_has_mark * UCP_TL_INFO_MARK_EXTRA),
+                                 first_tl ? tl_buf : "",
+                                 (int)(dev_width +
+                                       line_marks * UCP_TL_INFO_MARK_EXTRA),
+                                 dev_buf);
+                        first_tl    = 0;
+                        first_cmpt  = 0;
+                        first_type  = 0;
+                        printed_any = 1;
+                        dev_buf[0]  = '\0';
+                        dev_buf_len = 0;
+                        line_marks  = 0;
+                    }
+
+                    if (dev_count % UCP_TL_INFO_DEVS_PER_LINE > 0) {
+                        dev_buf_len += snprintf(dev_buf + dev_buf_len,
+                                                sizeof(dev_buf) - dev_buf_len,
+                                                "  ");
+                    }
+                    dev_buf_len += snprintf(dev_buf + dev_buf_len,
+                                            sizeof(dev_buf) - dev_buf_len,
+                                            "%s %s",
+                                            all_rscs[j].enabled ?
+                                                    "\xe2\x9c\x93" :
+                                                    "\xe2\x9c\x97",
+                                            all_rscs[j].rsc.dev_name);
+                    dev_count++;
+                    line_marks++;
+                }
+
+                if (dev_buf[0] != '\0') {
                     tl_has_mark = first_tl ? 1 : 0;
-                    ucs_info("| %-*s | %-*s | %-*s |",
+                    ucs_info("| %-*s | %-*s | %-*s | %-*s |",
+                             (int)type_width,
+                             first_type ?
+                                     uct_device_type_names[dev_type] : "",
                              (int)cmpt_width,
                              first_cmpt ?
                                      context->tl_cmpts[cmpt_idx].attr.name :
@@ -2911,41 +2997,9 @@ static void ucp_context_log_tl_info(ucp_context_h context,
                              dev_buf);
                     first_tl    = 0;
                     first_cmpt  = 0;
+                    first_type  = 0;
                     printed_any = 1;
-                    dev_buf[0]  = '\0';
-                    dev_buf_len = 0;
-                    line_marks  = 0;
                 }
-
-                if (dev_count % UCP_TL_INFO_DEVS_PER_LINE > 0) {
-                    dev_buf_len += snprintf(dev_buf + dev_buf_len,
-                                            sizeof(dev_buf) - dev_buf_len,
-                                            "  ");
-                }
-                dev_buf_len += snprintf(dev_buf + dev_buf_len,
-                                        sizeof(dev_buf) - dev_buf_len, "%s %s",
-                                        all_rscs[j].enabled ? "\xe2\x9c\x93" :
-                                                              "\xe2\x9c\x97",
-                                        all_rscs[j].rsc.dev_name);
-                dev_count++;
-                line_marks++;
-            }
-
-            if (dev_buf[0] != '\0') {
-                tl_has_mark = first_tl ? 1 : 0;
-                ucs_info("| %-*s | %-*s | %-*s |",
-                         (int)cmpt_width,
-                         first_cmpt ?
-                                 context->tl_cmpts[cmpt_idx].attr.name : "",
-                         (int)(tl_width +
-                               tl_has_mark * UCP_TL_INFO_MARK_EXTRA),
-                         first_tl ? tl_buf : "",
-                         (int)(dev_width +
-                               line_marks * UCP_TL_INFO_MARK_EXTRA),
-                         dev_buf);
-                first_tl    = 0;
-                first_cmpt  = 0;
-                printed_any = 1;
             }
         }
     }
@@ -2960,20 +3014,27 @@ static void ucp_context_log_tl_info(ucp_context_h context,
         }
         if (!has_rscs) {
             if (printed_any) {
-                ucs_info("+-%.*s-+-%.*s-+-%.*s-+", (int)cmpt_width,
-                         UCP_TL_INFO_DASHES, (int)tl_width, UCP_TL_INFO_DASHES,
+                ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
+                         (int)type_width, UCP_TL_INFO_DASHES,
+                         (int)cmpt_width, UCP_TL_INFO_DASHES,
+                         (int)tl_width, UCP_TL_INFO_DASHES,
                          (int)dev_width, UCP_TL_INFO_DASHES);
             }
-            ucs_info("| %-*s | %-*s | %-*s |", (int)cmpt_width,
-                     context->tl_cmpts[cmpt_idx].attr.name, (int)tl_width,
-                     "<unavailable>", (int)dev_width, "");
+            ucs_info("| %-*s | %-*s | %-*s | %-*s |",
+                     (int)type_width, "<unavailable>",
+                     (int)cmpt_width,
+                     context->tl_cmpts[cmpt_idx].attr.name,
+                     (int)tl_width, "",
+                     (int)dev_width, "");
             printed_any = 1;
         }
     }
 
-    ucs_info("+-%.*s-+-%.*s-+-%.*s-+", (int)cmpt_width, UCP_TL_INFO_DASHES,
-             (int)tl_width, UCP_TL_INFO_DASHES, (int)dev_width,
-             UCP_TL_INFO_DASHES);
+    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
+             (int)type_width, UCP_TL_INFO_DASHES,
+             (int)cmpt_width, UCP_TL_INFO_DASHES,
+             (int)tl_width, UCP_TL_INFO_DASHES,
+             (int)dev_width, UCP_TL_INFO_DASHES);
 }
 
 void ucp_context_print_info(ucp_context_h context, FILE *stream)
