@@ -2781,8 +2781,8 @@ static void ucp_context_log_tl_info(ucp_context_h context,
     size_t dev_buf_len;
 
     type_width = ucs_max(strlen("Type"), strlen("<unavailable>"));
-    tl_width   = strlen("Transports");
-    dev_width  = strlen("Devices");
+    tl_width   = strlen("Transport");
+    dev_width  = strlen("Device (System device)");
     cmpt_width = strlen("Component");
 
     for (dev_type = UCT_DEVICE_TYPE_NET; dev_type < UCT_DEVICE_TYPE_LAST;
@@ -2841,6 +2841,12 @@ static void ucp_context_log_tl_info(ucp_context_h context,
                 }
                 line_width += UCP_TL_INFO_MARK_VISUAL +
                               strlen(all_rscs[j].rsc.dev_name);
+                if (all_rscs[j].rsc.sys_device != UCS_SYS_DEVICE_ID_UNKNOWN) {
+                    line_width += 2 +
+                                  strlen(ucs_topo_sys_device_get_name(
+                                          all_rscs[j].rsc.sys_device)) +
+                                  1;
+                }
                 dev_count++;
             }
             if (line_width > dev_width) {
@@ -2855,11 +2861,9 @@ static void ucp_context_log_tl_info(ucp_context_h context,
              (int)cmpt_width, UCP_TL_INFO_DASHES,
              (int)tl_width, UCP_TL_INFO_DASHES,
              (int)dev_width, UCP_TL_INFO_DASHES);
-    ucs_info("| %-*s | %-*s | %-*s | %-*s |",
-             (int)type_width, "Type",
-             (int)cmpt_width, "Component",
-             (int)tl_width, "Transports",
-             (int)dev_width, "Devices");
+    ucs_info("| %-*s | %-*s | %-*s | %-*s |", (int)type_width, "Type",
+             (int)cmpt_width, "Component", (int)tl_width, "Transport",
+             (int)dev_width, "Device (System device)");
     ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+",
              (int)type_width, UCP_TL_INFO_DASHES,
              (int)cmpt_width, UCP_TL_INFO_DASHES,
@@ -2968,13 +2972,25 @@ static void ucp_context_log_tl_info(ucp_context_h context,
                                                 sizeof(dev_buf) - dev_buf_len,
                                                 "  ");
                     }
-                    dev_buf_len += snprintf(dev_buf + dev_buf_len,
-                                            sizeof(dev_buf) - dev_buf_len,
-                                            "%s %s",
-                                            all_rscs[j].enabled ?
-                                                    "\xe2\x9c\x93" :
-                                                    "\xe2\x9c\x97",
-                                            all_rscs[j].rsc.dev_name);
+                    if (all_rscs[j].rsc.sys_device !=
+                        UCS_SYS_DEVICE_ID_UNKNOWN) {
+                        dev_buf_len += snprintf(
+                                dev_buf + dev_buf_len,
+                                sizeof(dev_buf) - dev_buf_len, "%s %s (%s)",
+                                all_rscs[j].enabled ? "\xe2\x9c\x93" :
+                                                      "\xe2\x9c\x97",
+                                all_rscs[j].rsc.dev_name,
+                                ucs_topo_sys_device_get_name(
+                                        all_rscs[j].rsc.sys_device));
+                    } else {
+                        dev_buf_len += snprintf(dev_buf + dev_buf_len,
+                                                sizeof(dev_buf) - dev_buf_len,
+                                                "%s %s",
+                                                all_rscs[j].enabled ?
+                                                        "\xe2\x9c\x93" :
+                                                        "\xe2\x9c\x97",
+                                                all_rscs[j].rsc.dev_name);
+                    }
                     dev_count++;
                     line_marks++;
                 }
