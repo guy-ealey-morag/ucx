@@ -63,6 +63,10 @@ void ucp_context_log_tl_info(ucp_context_h context,
     char tl_buf[UCT_TL_NAME_MAX + 8];
     size_t dev_buf_len;
 
+    if (!ucs_log_is_enabled(UCS_LOG_LEVEL_INFO)) {
+        return;
+    }
+
     type_width = ucs_max(strlen("Type"), strlen("<unavailable>"));
     tl_width   = strlen("Transport");
     dev_width  = strlen("Device (System device)");
@@ -157,6 +161,8 @@ void ucp_context_log_tl_info(ucp_context_h context,
          ++dev_type) {
         first_type = 1;
         for (cmpt_idx = 0; cmpt_idx < context->num_cmpts; ++cmpt_idx) {
+            /* All resources from a single component are assumed to share the
+             * same device type, so the first match determines the type */
             cmpt_dev_type = UCT_DEVICE_TYPE_LAST;
             for (i = 0; i < num_all_rscs; ++i) {
                 if (all_rscs[i].cmpt_index == cmpt_idx) {
