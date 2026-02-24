@@ -11,6 +11,7 @@
 #include "ucp_tl_info.h"
 
 #include <ucs/debug/log.h>
+#include <ucs/datastruct/string_buffer.h>
 #include <ucs/sys/topo/base/topo.h>
 #include <ucs/sys/math.h>
 #include <string.h>
@@ -60,6 +61,8 @@ void ucp_context_log_tl_info(ucp_context_h context,
     char dev_buf[512];
     char tl_buf[UCT_TL_NAME_MAX + 8];
     size_t dev_buf_len;
+    ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
+    char *line;
 
     if (!ucs_log_is_enabled(UCS_LOG_LEVEL_INFO)) {
         return;
@@ -136,22 +139,26 @@ void ucp_context_log_tl_info(ucp_context_h context,
  * column-width variables. Defined here and #undef'd at end of function.
  */
 #define UCP_TL_INFO_LOG_SEP() \
-    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+", \
-             (int)type_width, UCP_TL_INFO_DASHES, \
-             (int)cmpt_width, UCP_TL_INFO_DASHES, \
-             (int)tl_width, UCP_TL_INFO_DASHES, \
-             (int)dev_width, UCP_TL_INFO_DASHES)
+    ucs_string_buffer_appendf(&strb, "+-%.*s-+-%.*s-+-%.*s-+-%.*s-+\n", \
+                              (int)type_width, UCP_TL_INFO_DASHES, \
+                              (int)cmpt_width, UCP_TL_INFO_DASHES, \
+                              (int)tl_width, UCP_TL_INFO_DASHES, \
+                              (int)dev_width, UCP_TL_INFO_DASHES)
 
-    ucs_info("+-%.*s-+",
-             (int)(type_width + cmpt_width + tl_width + dev_width + 9),
-             UCP_TL_INFO_DASHES);
-    ucs_info("| %-*s |",
-             (int)(type_width + cmpt_width + tl_width + dev_width + 9),
-             "Available Transports and Devices");
+    ucs_string_buffer_appendf(&strb, "+-%.*s-+\n",
+                              (int)(type_width + cmpt_width + tl_width +
+                                    dev_width + 9),
+                              UCP_TL_INFO_DASHES);
+    ucs_string_buffer_appendf(&strb, "| %-*s |\n",
+                              (int)(type_width + cmpt_width + tl_width +
+                                    dev_width + 9),
+                              "Available Transports and Devices");
     UCP_TL_INFO_LOG_SEP();
-    ucs_info(UCP_TL_INFO_ROW_FMT, (int)type_width, "Type",
-             (int)cmpt_width, "Component", (int)tl_width, "Transport",
-             (int)dev_width, "Device (System device)");
+    ucs_string_buffer_appendf(&strb, UCP_TL_INFO_ROW_FMT "\n",
+                              (int)type_width, "Type",
+                              (int)cmpt_width, "Component",
+                              (int)tl_width, "Transport",
+                              (int)dev_width, "Device (System device)");
     UCP_TL_INFO_LOG_SEP();
 
     printed_any = 0;
@@ -183,11 +190,13 @@ void ucp_context_log_tl_info(ucp_context_h context,
                     if (first_type) {
                         UCP_TL_INFO_LOG_SEP();
                     } else {
-                        ucs_info("| %-*s +-%.*s-+-%.*s-+-%.*s-+",
-                                 (int)type_width, "",
-                                 (int)cmpt_width, UCP_TL_INFO_DASHES,
-                                 (int)tl_width, UCP_TL_INFO_DASHES,
-                                 (int)dev_width, UCP_TL_INFO_DASHES);
+                        ucs_string_buffer_appendf(
+                                &strb,
+                                "| %-*s +-%.*s-+-%.*s-+-%.*s-+\n",
+                                (int)type_width, "",
+                                (int)cmpt_width, UCP_TL_INFO_DASHES,
+                                (int)tl_width, UCP_TL_INFO_DASHES,
+                                (int)dev_width, UCP_TL_INFO_DASHES);
                     }
                 }
 
@@ -216,18 +225,19 @@ void ucp_context_log_tl_info(ucp_context_h context,
 
                     if ((dev_count > 0) &&
                         (dev_count % UCP_TL_INFO_DEVS_PER_LINE == 0)) {
-                        ucs_info(UCP_TL_INFO_ROW_FMT,
-                                 (int)type_width,
-                                 first_type ?
-                                         uct_device_type_names[dev_type] : "",
-                                 (int)cmpt_width,
-                                 first_cmpt ?
-                                         context->tl_cmpts[cmpt_idx].attr.name :
-                                         "",
-                                 (int)tl_width,
-                                 first_tl ? tl_buf : "",
-                                 (int)dev_width,
-                                 dev_buf);
+                        ucs_string_buffer_appendf(
+                                &strb, UCP_TL_INFO_ROW_FMT "\n",
+                                (int)type_width,
+                                first_type ?
+                                        uct_device_type_names[dev_type] : "",
+                                (int)cmpt_width,
+                                first_cmpt ?
+                                        context->tl_cmpts[cmpt_idx].attr.name :
+                                        "",
+                                (int)tl_width,
+                                first_tl ? tl_buf : "",
+                                (int)dev_width,
+                                dev_buf);
                         first_tl    = 0;
                         first_cmpt  = 0;
                         first_type  = 0;
@@ -270,18 +280,19 @@ void ucp_context_log_tl_info(ucp_context_h context,
                 }
 
                 if (dev_buf[0] != '\0') {
-                    ucs_info(UCP_TL_INFO_ROW_FMT,
-                             (int)type_width,
-                             first_type ?
-                                     uct_device_type_names[dev_type] : "",
-                             (int)cmpt_width,
-                             first_cmpt ?
-                                     context->tl_cmpts[cmpt_idx].attr.name :
-                                     "",
-                             (int)tl_width,
-                             first_tl ? tl_buf : "",
-                             (int)dev_width,
-                             dev_buf);
+                    ucs_string_buffer_appendf(
+                            &strb, UCP_TL_INFO_ROW_FMT "\n",
+                            (int)type_width,
+                            first_type ?
+                                    uct_device_type_names[dev_type] : "",
+                            (int)cmpt_width,
+                            first_cmpt ?
+                                    context->tl_cmpts[cmpt_idx].attr.name :
+                                    "",
+                            (int)tl_width,
+                            first_tl ? tl_buf : "",
+                            (int)dev_width,
+                            dev_buf);
                     first_tl    = 0;
                     first_cmpt  = 0;
                     first_type  = 0;
@@ -303,16 +314,21 @@ void ucp_context_log_tl_info(ucp_context_h context,
             if (printed_any) {
                 UCP_TL_INFO_LOG_SEP();
             }
-            ucs_info(UCP_TL_INFO_ROW_FMT,
-                     (int)type_width, "<unavailable>",
-                     (int)cmpt_width,
-                     context->tl_cmpts[cmpt_idx].attr.name,
-                     (int)tl_width, "",
-                     (int)dev_width, "");
+            ucs_string_buffer_appendf(&strb, UCP_TL_INFO_ROW_FMT "\n",
+                                      (int)type_width, "<unavailable>",
+                                      (int)cmpt_width,
+                                      context->tl_cmpts[cmpt_idx].attr.name,
+                                      (int)tl_width, "",
+                                      (int)dev_width, "");
             printed_any = 1;
         }
     }
 
     UCP_TL_INFO_LOG_SEP();
+
+    ucs_string_buffer_for_each_token(line, &strb, "\n") {
+        ucs_log_print_compact(line);
+    }
+    ucs_string_buffer_cleanup(&strb);
 #undef UCP_TL_INFO_LOG_SEP
 }
