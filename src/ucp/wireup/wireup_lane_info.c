@@ -165,7 +165,8 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
     char dev_buf[128];
     int count, first_tl, printed_any;
 
-    if (!ucs_log_is_enabled(UCS_LOG_LEVEL_INFO)) {
+    if (!ucs_log_is_enabled(UCS_LOG_LEVEL_INFO) ||
+        (ep->flags & UCP_EP_FLAG_INTERNAL)) {
         return;
     }
 
