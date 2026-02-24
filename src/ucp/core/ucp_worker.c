@@ -20,6 +20,7 @@
 #include <ucp/wireup/address.h>
 #include <ucp/wireup/wireup_cm.h>
 #include <ucp/wireup/wireup_ep.h>
+#include <ucp/wireup/wireup_lane_info.h>
 #include <ucp/tag/eager.h>
 #include <ucp/tag/offload.h>
 #include <ucp/stream/stream.h>
@@ -2224,6 +2225,7 @@ ucs_status_t ucp_worker_get_ep_config(ucp_worker_h worker,
     }
 
     ucp_worker_print_used_tls(worker, ep_cfg_index);
+    ucp_wireup_log_ep_lanes(worker, key, ep_cfg_index);
 
 out:
     *cfg_index_p = ep_cfg_index;

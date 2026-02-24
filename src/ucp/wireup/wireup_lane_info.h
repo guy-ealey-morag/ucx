@@ -15,8 +15,7 @@
 
 void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
                              const ucp_ep_config_key_t *key,
-                             ucp_rsc_index_t cm_index,
-                             ucp_ep_h ep);
+                             ucp_worker_cfg_index_t cfg_index);
 
 
 #endif
