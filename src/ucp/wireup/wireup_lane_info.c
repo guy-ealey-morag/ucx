@@ -53,7 +53,6 @@ static int ucp_ep_lane_is_dev_leader(const ucp_ep_config_key_t *key,
 
 static int ucp_ep_lane_is_same_tl(const ucp_ep_config_key_t *key,
                                   ucp_context_h context,
-                                  ucp_rsc_index_t cm_index,
                                   ucp_lane_index_t a, ucp_lane_index_t b)
 {
     if ((a == key->cm_lane) && (b == key->cm_lane)) {
@@ -69,15 +68,13 @@ static int ucp_ep_lane_is_same_tl(const ucp_ep_config_key_t *key,
 
 static void ucp_wireup_get_lane_names(const ucp_ep_config_key_t *key,
                                       ucp_context_h context,
-                                      ucp_rsc_index_t cm_index,
                                       ucp_lane_index_t lane,
                                       const char **tl_name_p,
                                       const char **dev_name_p)
 {
     if (lane == key->cm_lane) {
         *tl_name_p  = "cm";
-        *dev_name_p = (cm_index != UCP_NULL_RESOURCE) ?
-                      ucp_context_cm_name(context, cm_index) : "<unknown>";
+        *dev_name_p = "cm";
     } else {
         *tl_name_p  = context->tl_rscs[key->lanes[lane].rsc_index].tl_rsc.tl_name;
         *dev_name_p = context->tl_rscs[key->lanes[lane].rsc_index].tl_rsc.dev_name;
@@ -87,7 +84,6 @@ static void ucp_wireup_get_lane_names(const ucp_ep_config_key_t *key,
 static void ucp_wireup_format_lane_dev(const ucp_ep_config_key_t *key,
                                        ucp_context_h context,
                                        ucp_lane_index_t lane,
-                                       ucp_rsc_index_t cm_index,
                                        const char *dev_name,
                                        char *buf, size_t buf_size)
 {
@@ -156,8 +152,7 @@ ucp_wireup_collect_lane_types(const ucp_ep_config_key_t *key,
 
 void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
                              const ucp_ep_config_key_t *key,
-                             ucp_rsc_index_t cm_index,
-                             ucp_ep_h ep)
+                             ucp_worker_cfg_index_t cfg_index)
 {
     ucp_context_h context = worker->context;
     ucp_lane_index_t lane, j;
@@ -172,8 +167,7 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
     ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
     char *line;
 
-    if (!ucs_log_is_enabled(UCS_LOG_LEVEL_INFO) ||
-        (ep->flags & UCP_EP_FLAG_INTERNAL)) {
+    if (!ucs_log_is_enabled(UCS_LOG_LEVEL_INFO)) {
         return;
     }
 
@@ -207,7 +201,7 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
             continue;
         }
 
-        ucp_wireup_get_lane_names(key, context, cm_index, lane,
+        ucp_wireup_get_lane_names(key, context, lane,
                                   &tl_name, &dev_name);
 
         len = strlen(tl_name);
@@ -215,7 +209,7 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
             tl_width = len;
         }
 
-        ucp_wireup_format_lane_dev(key, context, lane, cm_index,
+        ucp_wireup_format_lane_dev(key, context, lane,
                                    dev_name, dev_buf, sizeof(dev_buf));
 
         len = strlen(dev_buf);
@@ -232,8 +226,8 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
         }
     }
 
-    snprintf(title_buf, sizeof(title_buf), "Endpoint Lanes: ep %p (%s)",
-             ep, ep_type);
+    snprintf(title_buf, sizeof(title_buf), "Endpoint Config (idx: %d, type: %s)",
+             cfg_index, ep_type);
     total_width = tl_width + dev_width + count_width + types_width + 9;
 
     ucs_string_buffer_appendf(&strb, "+-%.*s-+\n",
@@ -260,7 +254,7 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
             if (!ucp_ep_lane_is_dev_leader(key, j)) {
                 continue;
             }
-            if (ucp_ep_lane_is_same_tl(key, context, cm_index, j, lane)) {
+            if (ucp_ep_lane_is_same_tl(key, context, j, lane)) {
                 first_tl = 0;
                 break;
             }
@@ -270,9 +264,9 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
             UCP_LANE_INFO_LOG_SEP();
         }
 
-        ucp_wireup_get_lane_names(key, context, cm_index, lane,
+        ucp_wireup_get_lane_names(key, context, lane,
                                   &tl_name, &dev_name);
-        ucp_wireup_format_lane_dev(key, context, lane, cm_index,
+        ucp_wireup_format_lane_dev(key, context, lane,
                                    dev_name, dev_buf, sizeof(dev_buf));
 
         types_union = ucp_wireup_collect_lane_types(key, lane, &count);
