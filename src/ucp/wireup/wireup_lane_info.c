@@ -12,6 +12,7 @@
 
 #include <ucp/proto/lane_type.h>
 #include <ucs/debug/log.h>
+#include <ucs/datastruct/string_buffer.h>
 #include <ucs/sys/topo/base/topo.h>
 #include <string.h>
 
@@ -164,6 +165,8 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
     char types_buf[128];
     char dev_buf[128];
     int count, first_tl, printed_any;
+    ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
+    char *line;
 
     if (!ucs_log_is_enabled(UCS_LOG_LEVEL_INFO) ||
         (ep->flags & UCP_EP_FLAG_INTERNAL)) {
@@ -188,11 +191,11 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
  * column-width variables. Defined here and #undef'd at end of function.
  */
 #define UCP_LANE_INFO_LOG_SEP() \
-    ucs_info("+-%.*s-+-%.*s-+-%.*s-+-%.*s-+", \
-             (int)tl_width, UCP_EP_LANE_INFO_DASHES, \
-             (int)dev_width, UCP_EP_LANE_INFO_DASHES, \
-             (int)count_width, UCP_EP_LANE_INFO_DASHES, \
-             (int)types_width, UCP_EP_LANE_INFO_DASHES)
+    ucs_string_buffer_appendf(&strb, "+-%.*s-+-%.*s-+-%.*s-+-%.*s-+\n", \
+                              (int)tl_width, UCP_EP_LANE_INFO_DASHES, \
+                              (int)dev_width, UCP_EP_LANE_INFO_DASHES, \
+                              (int)count_width, UCP_EP_LANE_INFO_DASHES, \
+                              (int)types_width, UCP_EP_LANE_INFO_DASHES)
 
     /* Pass 1: compute column widths */
     for (lane = 0; lane < key->num_lanes; ++lane) {
@@ -229,14 +232,16 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
              ep, ep_type);
     total_width = tl_width + dev_width + count_width + types_width + 9;
 
-    ucs_info("+-%.*s-+", (int)total_width, UCP_EP_LANE_INFO_DASHES);
-    ucs_info("| %-*s |", (int)total_width, title_buf);
+    ucs_string_buffer_appendf(&strb, "+-%.*s-+\n",
+                              (int)total_width, UCP_EP_LANE_INFO_DASHES);
+    ucs_string_buffer_appendf(&strb, "| %-*s |\n",
+                              (int)total_width, title_buf);
     UCP_LANE_INFO_LOG_SEP();
-    ucs_info(UCP_EP_LANE_INFO_ROW_FMT,
-             (int)tl_width, "Transport",
-             (int)dev_width, "Device (Sys. dev.)",
-             (int)count_width, "# Lanes",
-             (int)types_width, "Lane Types");
+    ucs_string_buffer_appendf(&strb, UCP_EP_LANE_INFO_ROW_FMT "\n",
+                              (int)tl_width, "Transport",
+                              (int)dev_width, "Device (Sys. dev.)",
+                              (int)count_width, "# Lanes",
+                              (int)types_width, "Lane Types");
     UCP_LANE_INFO_LOG_SEP();
 
     /* Pass 2: print rows grouped by transport */
@@ -269,15 +274,20 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
         types_union = ucp_wireup_collect_lane_types(key, lane, &count);
         ucp_wireup_format_lane_types(types_union, types_buf, sizeof(types_buf));
 
-        ucs_info("| %-*s | %-*s | %*d | %-*s |",
-                 (int)tl_width, first_tl ? tl_name : "",
-                 (int)dev_width, dev_buf,
-                 (int)count_width, count,
-                 (int)types_width, types_buf);
+        ucs_string_buffer_appendf(&strb, "| %-*s | %-*s | %*d | %-*s |\n",
+                                  (int)tl_width, first_tl ? tl_name : "",
+                                  (int)dev_width, dev_buf,
+                                  (int)count_width, count,
+                                  (int)types_width, types_buf);
 
         printed_any = 1;
     }
 
     UCP_LANE_INFO_LOG_SEP();
+
+    ucs_string_buffer_for_each_token(line, &strb, "\n") {
+        ucs_log_print_compact(line);
+    }
+    ucs_string_buffer_cleanup(&strb);
 #undef UCP_LANE_INFO_LOG_SEP
 }
