@@ -14,6 +14,7 @@
 #include <ucs/debug/log.h>
 #include <ucs/datastruct/string_buffer.h>
 #include <ucs/sys/topo/base/topo.h>
+#include <ucs/sys/string.h>
 #include <string.h>
 
 
@@ -226,8 +227,14 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
         }
     }
 
-    snprintf(title_buf, sizeof(title_buf), "Endpoint Config (idx: %d, type: %s)",
-             cfg_index, ep_type);
+    if (!ucs_string_is_empty(context->name)) {
+        snprintf(title_buf, sizeof(title_buf),
+                 "Endpoint Config #%d (ctx: %s, type: %s)",
+                 cfg_index, context->name, ep_type);
+    } else {
+        snprintf(title_buf, sizeof(title_buf),
+                 "Endpoint Config #%d (type: %s)", cfg_index, ep_type);
+    }
     total_width = tl_width + dev_width + count_width + types_width + 9;
 
     ucs_string_buffer_appendf(&strb, "+-%.*s-+\n",

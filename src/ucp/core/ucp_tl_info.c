@@ -14,6 +14,7 @@
 #include <ucs/datastruct/string_buffer.h>
 #include <ucs/sys/topo/base/topo.h>
 #include <ucs/sys/math.h>
+#include <ucs/sys/string.h>
 #include <string.h>
 
 
@@ -64,6 +65,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
     int dev_count;
     int has_rscs, tl_enabled;
     char dev_buf[512];
+    char title_buf[96];
     char tl_buf[UCT_TL_NAME_MAX + 8];
     size_t dev_buf_len;
     ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
@@ -151,6 +153,14 @@ void ucp_context_log_tl_info(ucp_context_h context,
                               (int)tl_width, UCP_TL_INFO_DASHES, \
                               (int)dev_width, UCP_TL_INFO_DASHES)
 
+    if (!ucs_string_is_empty(context->name)) {
+        snprintf(title_buf, sizeof(title_buf),
+                 "Available Transports and Devices (ctx: %s)", context->name);
+    } else {
+        snprintf(title_buf, sizeof(title_buf),
+                 "Available Transports and Devices");
+    }
+
     ucs_string_buffer_appendf(&strb, "+-%.*s-+\n",
                               (int)(type_width + cmpt_width + tl_width +
                                     dev_width + 9),
@@ -158,7 +168,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
     ucs_string_buffer_appendf(&strb, "| %-*s |\n",
                               (int)(type_width + cmpt_width + tl_width +
                                     dev_width + 9),
-                              "Available Transports and Devices");
+                              title_buf);
     UCP_TL_INFO_LOG_SEP();
     ucs_string_buffer_appendf(&strb, UCP_TL_INFO_ROW_FMT "\n",
                               (int)type_width, UCP_TL_INFO_HDR_TYPE,
