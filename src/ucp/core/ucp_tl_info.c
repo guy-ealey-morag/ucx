@@ -20,12 +20,10 @@
     "------------------------------------------------------------------------" \
     "------------------------------------------------------------------------"
 #define UCP_TL_INFO_DEVS_PER_LINE  3
-/* Visual width of the UTF-8 check/cross mark characters (2 display columns) */
+/* Visual width of mark character + separator space */
 #define UCP_TL_INFO_MARK_VISUAL    2
-/* Extra bytes that UTF-8 marks occupy beyond their visual width */
-#define UCP_TL_INFO_MARK_EXTRA     2
-#define UCP_TL_INFO_MARK_ENABLED   "\xe2\x9c\x93" /* ✓ */
-#define UCP_TL_INFO_MARK_DISABLED  "\xe2\x9c\x97" /* ✗ */
+#define UCP_TL_INFO_MARK_ENABLED   "+"
+#define UCP_TL_INFO_MARK_DISABLED  "-"
 #define UCP_TL_INFO_ROW_FMT        "| %-*s | %-*s | %-*s | %-*s |"
 
 static int ucp_tl_info_is_same_group(const ucp_tl_info_entry_t *entries,
@@ -57,8 +55,8 @@ void ucp_context_log_tl_info(ucp_context_h context,
     unsigned i, j;
     size_t type_width, tl_width, dev_width, cmpt_width, len, line_width;
     int printed_any, first_type, first_cmpt, first_tl;
-    int dev_count, line_marks;
-    int has_rscs, tl_enabled, tl_has_mark;
+    int dev_count;
+    int has_rscs, tl_enabled;
     char dev_buf[512];
     char tl_buf[UCT_TL_NAME_MAX + 8];
     size_t dev_buf_len;
@@ -209,7 +207,6 @@ void ucp_context_log_tl_info(ucp_context_h context,
 
                 first_tl    = 1;
                 dev_count   = 0;
-                line_marks  = 0;
                 dev_buf[0]  = '\0';
                 dev_buf_len = 0;
                 for (j = i; j < num_all_rscs; ++j) {
@@ -219,7 +216,6 @@ void ucp_context_log_tl_info(ucp_context_h context,
 
                     if ((dev_count > 0) &&
                         (dev_count % UCP_TL_INFO_DEVS_PER_LINE == 0)) {
-                        tl_has_mark = first_tl ? 1 : 0;
                         ucs_info(UCP_TL_INFO_ROW_FMT,
                                  (int)type_width,
                                  first_type ?
@@ -228,11 +224,9 @@ void ucp_context_log_tl_info(ucp_context_h context,
                                  first_cmpt ?
                                          context->tl_cmpts[cmpt_idx].attr.name :
                                          "",
-                                 (int)(tl_width +
-                                       tl_has_mark * UCP_TL_INFO_MARK_EXTRA),
+                                 (int)tl_width,
                                  first_tl ? tl_buf : "",
-                                 (int)(dev_width +
-                                       line_marks * UCP_TL_INFO_MARK_EXTRA),
+                                 (int)dev_width,
                                  dev_buf);
                         first_tl    = 0;
                         first_cmpt  = 0;
@@ -240,7 +234,6 @@ void ucp_context_log_tl_info(ucp_context_h context,
                         printed_any = 1;
                         dev_buf[0]  = '\0';
                         dev_buf_len = 0;
-                        line_marks  = 0;
                     }
 
                     if (dev_count % UCP_TL_INFO_DEVS_PER_LINE > 0) {
@@ -274,11 +267,9 @@ void ucp_context_log_tl_info(ucp_context_h context,
                         dev_buf_len = sizeof(dev_buf) - 1;
                     }
                     dev_count++;
-                    line_marks++;
                 }
 
                 if (dev_buf[0] != '\0') {
-                    tl_has_mark = first_tl ? 1 : 0;
                     ucs_info(UCP_TL_INFO_ROW_FMT,
                              (int)type_width,
                              first_type ?
@@ -287,11 +278,9 @@ void ucp_context_log_tl_info(ucp_context_h context,
                              first_cmpt ?
                                      context->tl_cmpts[cmpt_idx].attr.name :
                                      "",
-                             (int)(tl_width +
-                                   tl_has_mark * UCP_TL_INFO_MARK_EXTRA),
+                             (int)tl_width,
                              first_tl ? tl_buf : "",
-                             (int)(dev_width +
-                                   line_marks * UCP_TL_INFO_MARK_EXTRA),
+                             (int)dev_width,
                              dev_buf);
                     first_tl    = 0;
                     first_cmpt  = 0;
