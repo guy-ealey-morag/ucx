@@ -60,7 +60,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
     uct_device_type_t dev_type, cmpt_dev_type;
     unsigned i, j;
     size_t type_width, tl_width, dev_width, cmpt_width, len, line_width;
-    int printed_any, first_type, first_cmpt, first_tl;
+    int printed_any, first_type, first_cmpt, first_tl, first_unavail;
     int dev_count;
     int has_rscs, tl_enabled;
     char dev_buf[512];
@@ -308,6 +308,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
         }
     }
 
+    first_unavail = 1;
     for (cmpt_idx = 0; cmpt_idx < context->num_cmpts; ++cmpt_idx) {
         has_rscs = 0;
         for (i = 0; i < num_all_rscs; ++i) {
@@ -317,15 +318,34 @@ void ucp_context_log_tl_info(ucp_context_h context,
             }
         }
         if (!has_rscs) {
-            if (printed_any) {
-                UCP_TL_INFO_LOG_SEP();
+            if (first_unavail) {
+                if (printed_any) {
+                    UCP_TL_INFO_LOG_SEP();
+                }
+                ucs_string_buffer_appendf(
+                        &strb, UCP_TL_INFO_ROW_FMT "\n",
+                        (int)type_width, UCP_TL_INFO_UNAVAILABLE,
+                        (int)cmpt_width,
+                        context->tl_cmpts[cmpt_idx].attr.name,
+                        (int)tl_width, "",
+                        (int)dev_width, "");
+                first_unavail = 0;
+            } else {
+                ucs_string_buffer_appendf(
+                        &strb,
+                        "+ %-*s +-%.*s-+-%.*s-+-%.*s-+\n",
+                        (int)type_width, "",
+                        (int)cmpt_width, UCP_TL_INFO_DASHES,
+                        (int)tl_width, UCP_TL_INFO_DASHES,
+                        (int)dev_width, UCP_TL_INFO_DASHES);
+                ucs_string_buffer_appendf(
+                        &strb, UCP_TL_INFO_ROW_FMT "\n",
+                        (int)type_width, "",
+                        (int)cmpt_width,
+                        context->tl_cmpts[cmpt_idx].attr.name,
+                        (int)tl_width, "",
+                        (int)dev_width, "");
             }
-            ucs_string_buffer_appendf(&strb, UCP_TL_INFO_ROW_FMT "\n",
-                                      (int)type_width, UCP_TL_INFO_UNAVAILABLE,
-                                      (int)cmpt_width,
-                                      context->tl_cmpts[cmpt_idx].attr.name,
-                                      (int)tl_width, "",
-                                      (int)dev_width, "");
             printed_any = 1;
         }
     }
