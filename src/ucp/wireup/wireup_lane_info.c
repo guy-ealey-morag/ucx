@@ -20,7 +20,11 @@
 #define UCP_EP_LANE_INFO_DASHES \
     "------------------------------------------------------------------------" \
     "------------------------------------------------------------------------"
-#define UCP_EP_LANE_INFO_ROW_FMT "| %-*s | %-*s | %-*s | %-*s |"
+#define UCP_EP_LANE_INFO_ROW_FMT   "| %-*s | %-*s | %-*s | %-*s |"
+#define UCP_EP_LANE_INFO_HDR_TL    "Transport"
+#define UCP_EP_LANE_INFO_HDR_DEV   "Device (Sys. dev.)"
+#define UCP_EP_LANE_INFO_HDR_COUNT "# Lanes"
+#define UCP_EP_LANE_INFO_HDR_TYPES "Lane Types"
 
 static int ucp_ep_lane_is_same_dev(const ucp_ep_config_key_t *key,
                                    ucp_lane_index_t a, ucp_lane_index_t b)
@@ -181,10 +185,10 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
         ep_type = "inter-node";
     }
 
-    tl_width    = strlen("Transport");
-    dev_width   = strlen("Device (Sys. dev.)");
-    count_width = strlen("# Lanes");
-    types_width = strlen("Lane Types");
+    tl_width    = strlen(UCP_EP_LANE_INFO_HDR_TL);
+    dev_width   = strlen(UCP_EP_LANE_INFO_HDR_DEV);
+    count_width = strlen(UCP_EP_LANE_INFO_HDR_COUNT);
+    types_width = strlen(UCP_EP_LANE_INFO_HDR_TYPES);
 
 /*
  * Scoped macro: emits a 4-column separator line using the local
@@ -238,10 +242,10 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
                               (int)total_width, title_buf);
     UCP_LANE_INFO_LOG_SEP();
     ucs_string_buffer_appendf(&strb, UCP_EP_LANE_INFO_ROW_FMT "\n",
-                              (int)tl_width, "Transport",
-                              (int)dev_width, "Device (Sys. dev.)",
-                              (int)count_width, "# Lanes",
-                              (int)types_width, "Lane Types");
+                              (int)tl_width, UCP_EP_LANE_INFO_HDR_TL,
+                              (int)dev_width, UCP_EP_LANE_INFO_HDR_DEV,
+                              (int)count_width, UCP_EP_LANE_INFO_HDR_COUNT,
+                              (int)types_width, UCP_EP_LANE_INFO_HDR_TYPES);
     UCP_LANE_INFO_LOG_SEP();
 
     /* Pass 2: print rows grouped by transport */

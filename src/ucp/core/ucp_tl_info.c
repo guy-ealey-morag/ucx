@@ -26,6 +26,11 @@
 #define UCP_TL_INFO_MARK_ENABLED   "+"
 #define UCP_TL_INFO_MARK_DISABLED  "-"
 #define UCP_TL_INFO_ROW_FMT        "| %-*s | %-*s | %-*s | %-*s |"
+#define UCP_TL_INFO_HDR_TYPE       "Type"
+#define UCP_TL_INFO_HDR_TRANSPORT  "Transport"
+#define UCP_TL_INFO_HDR_DEVICE     "Device (System device)"
+#define UCP_TL_INFO_HDR_COMPONENT  "Component"
+#define UCP_TL_INFO_UNAVAILABLE    "<unavailable>"
 
 static int ucp_tl_info_is_same_group(const ucp_tl_info_entry_t *entries,
                                      unsigned a, unsigned b)
@@ -68,10 +73,11 @@ void ucp_context_log_tl_info(ucp_context_h context,
         return;
     }
 
-    type_width = ucs_max(strlen("Type"), strlen("<unavailable>"));
-    tl_width   = strlen("Transport");
-    dev_width  = strlen("Device (System device)");
-    cmpt_width = strlen("Component");
+    type_width = ucs_max(strlen(UCP_TL_INFO_HDR_TYPE),
+                         strlen(UCP_TL_INFO_UNAVAILABLE));
+    tl_width   = strlen(UCP_TL_INFO_HDR_TRANSPORT);
+    dev_width  = strlen(UCP_TL_INFO_HDR_DEVICE);
+    cmpt_width = strlen(UCP_TL_INFO_HDR_COMPONENT);
 
     for (dev_type = UCT_DEVICE_TYPE_NET; dev_type < UCT_DEVICE_TYPE_LAST;
          ++dev_type) {
@@ -155,10 +161,10 @@ void ucp_context_log_tl_info(ucp_context_h context,
                               "Available Transports and Devices");
     UCP_TL_INFO_LOG_SEP();
     ucs_string_buffer_appendf(&strb, UCP_TL_INFO_ROW_FMT "\n",
-                              (int)type_width, "Type",
-                              (int)cmpt_width, "Component",
-                              (int)tl_width, "Transport",
-                              (int)dev_width, "Device (System device)");
+                              (int)type_width, UCP_TL_INFO_HDR_TYPE,
+                              (int)cmpt_width, UCP_TL_INFO_HDR_COMPONENT,
+                              (int)tl_width, UCP_TL_INFO_HDR_TRANSPORT,
+                              (int)dev_width, UCP_TL_INFO_HDR_DEVICE);
     UCP_TL_INFO_LOG_SEP();
 
     printed_any = 0;
@@ -315,7 +321,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
                 UCP_TL_INFO_LOG_SEP();
             }
             ucs_string_buffer_appendf(&strb, UCP_TL_INFO_ROW_FMT "\n",
-                                      (int)type_width, "<unavailable>",
+                                      (int)type_width, UCP_TL_INFO_UNAVAILABLE,
                                       (int)cmpt_width,
                                       context->tl_cmpts[cmpt_idx].attr.name,
                                       (int)tl_width, "",
