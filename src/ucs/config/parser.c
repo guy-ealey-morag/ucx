@@ -855,8 +855,9 @@ static int ucs_config_sscanf_array_impl(const char *buf, void *dest,
     void *temp_field;
 
     if (expand_ranges) {
-        if (ucs_string_buffer_expand_ranges(buf, ',', UCS_CONFIG_ARRAY_MAX,
-                                            &strb, NULL) != UCS_OK) {
+        if (ucs_string_buffer_expand_ranges(&strb, buf, ',',
+                                            UCS_CONFIG_ARRAY_MAX,
+                                            NULL) != UCS_OK) {
             goto err_strb_cleanup;
         }
     } else {
