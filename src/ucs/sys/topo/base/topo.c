@@ -1,5 +1,5 @@
 /**
-* Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2019-2022. ALL RIGHTS RESERVED.
+* Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2019-2026. ALL RIGHTS RESERVED.
 *
 * See file LICENSE for terms.
 */
@@ -28,6 +28,20 @@
 #define UCS_TOPO_SYSFS_DEVICES_ROOT  "/sys/devices"
 #define UCS_TOPO_DEVICE_NAME_UNKNOWN "<unknown>"
 #define UCS_TOPO_DEVICE_NAME_INVALID "<invalid>"
+
+/* PCIe Extended Capability space constants for ACS detection */
+#define UCS_TOPO_PCI_EXT_CAP_START    0x100
+#define UCS_TOPO_PCI_EXT_CAP_ID_ACS   0x000D
+#define UCS_TOPO_PCI_ACS_CTRL_OFFSET  6
+#define UCS_TOPO_PCI_CFG_SPACE_SIZE   4096
+#define UCS_TOPO_PCI_EXT_CAP_MAX_WALK 48
+#define UCS_TOPO_PCI_ACS_RR           UCS_BIT(2) /* P2P Request Redirect */
+#define UCS_TOPO_PCI_ACS_CR           UCS_BIT(3) /* P2P Completion Redirect */
+#define UCS_TOPO_PCI_ACS_UF           UCS_BIT(4) /* Upstream Forwarding */
+#define UCS_TOPO_PCI_ACS_EC           UCS_BIT(5) /* P2P Egress Control */
+#define UCS_TOPO_PCI_ACS_P2P_BLOCK_MASK \
+    (UCS_TOPO_PCI_ACS_RR | UCS_TOPO_PCI_ACS_CR | UCS_TOPO_PCI_ACS_UF | \
+     UCS_TOPO_PCI_ACS_EC)
 
 /*
  * Function pointer used to refer to specific implementations of
@@ -583,6 +597,10 @@ ucs_topo_is_reachable(ucs_sys_device_t sys_dev, ucs_sys_device_t sys_dev_mem)
             (ucs_topo_global_ctx.devices[sys_dev].sibling_sys_dev ==
              sys_dev_mem);
     ucs_spin_unlock(&ucs_topo_global_ctx.lock);
+
+    if (result && ucs_topo_is_p2p_acs_enabled(sys_dev, sys_dev_mem)) {
+        result = 0;
+    }
 
     return result;
 }
@@ -1242,6 +1260,229 @@ double ucs_topo_get_pci_bw(const char *dev_name, const char *sysfs_path)
 out_max_bw:
     ucs_debug("%s: pci bandwidth undetected, using maximal value", dev_name);
     return UCS_INFINITY;
+}
+
+int ucs_topo_is_acs_p2p_blocking_in_config(const uint8_t *cfg_buf,
+                                           size_t cfg_size)
+{
+    uint32_t header, offset;
+    uint16_t cap_id, acs_ctrl;
+    int walk_count;
+
+    offset     = UCS_TOPO_PCI_EXT_CAP_START;
+    walk_count = 0;
+
+    while ((offset >= UCS_TOPO_PCI_EXT_CAP_START) && (offset + 4 <= cfg_size) &&
+           (walk_count++ < UCS_TOPO_PCI_EXT_CAP_MAX_WALK)) {
+        /* PCIe extended capability header (little-endian):
+         *   bits [15:0]  = capability ID
+         *   bits [19:16] = version
+         *   bits [31:20] = next capability offset */
+        header = (uint32_t)cfg_buf[offset] |
+                 ((uint32_t)cfg_buf[offset + 1] << 8) |
+                 ((uint32_t)cfg_buf[offset + 2] << 16) |
+                 ((uint32_t)cfg_buf[offset + 3] << 24);
+        cap_id = header & 0xFFFF;
+
+        if (cap_id == 0) {
+            break;
+        }
+
+        if (cap_id == UCS_TOPO_PCI_EXT_CAP_ID_ACS) {
+            if (offset + UCS_TOPO_PCI_ACS_CTRL_OFFSET + 2 > cfg_size) {
+                break;
+            }
+
+            acs_ctrl =
+                    (uint16_t)cfg_buf[offset + UCS_TOPO_PCI_ACS_CTRL_OFFSET] |
+                    ((uint16_t)cfg_buf[offset + UCS_TOPO_PCI_ACS_CTRL_OFFSET + 1]
+                     << 8);
+
+            return !!(acs_ctrl & UCS_TOPO_PCI_ACS_P2P_BLOCK_MASK);
+        }
+
+        /* Follow linked list: next offset from bits [31:20], DWORD-aligned */
+        offset = (header >> 20) & 0xFFC;
+        if (offset == 0) {
+            break;
+        }
+    }
+
+    return 0;
+}
+
+static int ucs_topo_is_bridge_acs_blocking(const char *bdf)
+{
+    ucs_status_t status;
+    uint8_t *cfg_buf;
+    ssize_t nread;
+    char *path;
+    int fd, result;
+
+    result = 0;
+
+    status = ucs_string_alloc_path_buffer(&path, "acs_config_path");
+    if (status != UCS_OK) {
+        goto out;
+    }
+
+    ucs_snprintf_safe(path, PATH_MAX, UCS_TOPO_SYSFS_PCI_PREFIX "%s/config",
+                      bdf);
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        if ((errno == EACCES) || (errno == EPERM)) {
+            ucs_trace("no permission to read %s for ACS check", path);
+        } else {
+            ucs_warn("could not open %s for ACS check: %m", path);
+        }
+        goto out_free_path;
+    }
+
+    cfg_buf = (uint8_t*)ucs_malloc(UCS_TOPO_PCI_CFG_SPACE_SIZE, "pci_config");
+    if (cfg_buf == NULL) {
+        goto out_close_fd;
+    }
+
+    nread = read(fd, cfg_buf, UCS_TOPO_PCI_CFG_SPACE_SIZE);
+    if (nread < 0) {
+        ucs_debug("failed to read PCI config space from %s: %m", path);
+    } else if (nread >= (ssize_t)UCS_TOPO_PCI_EXT_CAP_START) {
+        result = ucs_topo_is_acs_p2p_blocking_in_config(cfg_buf, (size_t)nread);
+        if (result) {
+            ucs_debug("bridge %s has ACS P2P blocking enabled", bdf);
+        }
+    }
+
+    ucs_free(cfg_buf);
+out_close_fd:
+    close(fd);
+out_free_path:
+    ucs_free(path);
+out:
+    return result;
+}
+
+/*
+ * Check ACS on all bridges between a device and its common ancestor.
+ *
+ * Walks the sysfs path components between common_path and device path,
+ * skipping the last component (the endpoint device itself).
+ *
+ * @param path        Full sysfs path of the device
+ * @param common_len  Length of the common ancestor path prefix
+ *
+ * @return 1 if any intermediate bridge has ACS blocking, 0 otherwise
+ */
+static int ucs_topo_check_acs_on_path(const char *path, size_t common_len)
+{
+    const char *rel, *slash, *last_slash;
+    char bdf[UCS_SYS_BDF_NAME_MAX];
+    size_t bdf_len;
+
+    rel = path + common_len;
+    if (*rel == '/') {
+        rel++;
+    }
+
+    last_slash = strrchr(rel, '/');
+    if (last_slash == NULL) {
+        return 0;
+    }
+
+    while (rel < last_slash) {
+        slash = strchr(rel, '/');
+        if ((slash == NULL) || (slash > last_slash)) {
+            break;
+        }
+
+        bdf_len = slash - rel;
+        if (bdf_len >= sizeof(bdf)) {
+            break;
+        }
+
+        memcpy(bdf, rel, bdf_len);
+        bdf[bdf_len] = '\0';
+
+        /* Skip PCI root entries (e.g. "pci0000:c0") which are not BDFs */
+        if ((strncmp(bdf, "pci", 3) != 0) &&
+            ucs_topo_is_bridge_acs_blocking(bdf)) {
+            return 1;
+        }
+
+        rel = slash + 1;
+    }
+
+    return 0;
+}
+
+/*
+ * Check ACS on all bridges on the path between two devices.
+ *
+ * Checks three sets of bridges:
+ * 1. The common ancestor itself (if it is a PCI bridge, not a root)
+ * 2. Bridges between device 1 and the common ancestor
+ * 3. Bridges between device 2 and the common ancestor
+ */
+static int ucs_topo_check_acs_between_paths(const char *path1,
+                                            const char *path2,
+                                            const char *common_path)
+{
+    size_t common_len = strlen(common_path);
+    const char *last_slash;
+    char bdf[UCS_SYS_BDF_NAME_MAX];
+
+    if (!ucs_topo_is_sys_root(common_path) &&
+        !ucs_topo_is_pci_root(common_path)) {
+        last_slash = strrchr(common_path, '/');
+        if (last_slash != NULL) {
+            ucs_strncpy_safe(bdf, last_slash + 1, sizeof(bdf));
+            if (ucs_topo_is_bridge_acs_blocking(bdf)) {
+                return 1;
+            }
+        }
+    }
+
+    if (ucs_topo_check_acs_on_path(path1, common_len)) {
+        return 1;
+    }
+
+    return ucs_topo_check_acs_on_path(path2, common_len);
+}
+
+int ucs_topo_is_p2p_acs_enabled(ucs_sys_device_t sys_dev1,
+                                ucs_sys_device_t sys_dev2)
+{
+    char *path1, *path2, *common_path;
+    ucs_status_t status;
+    int result;
+
+    if ((sys_dev1 == UCS_SYS_DEVICE_ID_UNKNOWN) ||
+        (sys_dev2 == UCS_SYS_DEVICE_ID_UNKNOWN) || (sys_dev1 == sys_dev2)) {
+        return 0;
+    }
+
+    ucs_spin_lock(&ucs_topo_global_ctx.lock);
+    status = ucs_topo_get_common_path(sys_dev1, sys_dev2, &path1, &path2,
+                                      &common_path);
+    ucs_spin_unlock(&ucs_topo_global_ctx.lock);
+    if (status != UCS_OK) {
+        return 0;
+    }
+
+    result = ucs_topo_check_acs_between_paths(path1, path2, common_path);
+
+    if (result) {
+        ucs_info("PCIe ACS is blocking P2P between %s and %s",
+                 ucs_topo_sys_device_get_name(sys_dev1),
+                 ucs_topo_sys_device_get_name(sys_dev2));
+    }
+
+    ucs_free(common_path);
+    ucs_free(path2);
+    ucs_free(path1);
+
+    return result;
 }
 
 const char *ucs_topo_resolve_sysfs_path(const char *dev_path, char *path_buffer)
