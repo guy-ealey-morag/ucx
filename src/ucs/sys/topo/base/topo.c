@@ -318,6 +318,9 @@ out:
     return numa_node;
 }
 
+static void ucs_topo_update_acs_for_new_device(ucs_sys_device_t new_dev,
+                                               unsigned num_existing);
+
 ucs_status_t ucs_topo_find_device_by_bus_id(const ucs_sys_bus_id_t *bus_id,
                                             ucs_sys_device_t *sys_dev)
 {
@@ -381,6 +384,12 @@ ucs_status_t ucs_topo_find_device_by_bus_id(const ucs_sys_bus_id_t *bus_id,
 
 out:
     ucs_spin_unlock(&ucs_topo_global_ctx.lock);
+
+    if ((status == UCS_OK) && ((kh_put_status == UCS_KH_PUT_BUCKET_EMPTY) ||
+                               (kh_put_status == UCS_KH_PUT_BUCKET_CLEAR))) {
+        ucs_topo_update_acs_for_new_device(*sys_dev, *sys_dev);
+    }
+
     return status;
 }
 
@@ -616,7 +625,8 @@ ucs_topo_is_reachable(ucs_sys_device_t sys_dev, ucs_sys_device_t sys_dev_mem)
              sys_dev_mem);
     ucs_spin_unlock(&ucs_topo_global_ctx.lock);
 
-    if (result && ucs_topo_is_p2p_acs_enabled(sys_dev, sys_dev_mem)) {
+    if (result && (ucs_topo_global_ctx.acs.pair_cache[sys_dev][sys_dev_mem] ==
+                   UCS_TOPO_ACS_BLOCKED)) {
         result = 0;
     }
 
@@ -1341,16 +1351,16 @@ static int ucs_topo_is_bridge_acs_blocking(const char *bdf)
     int fd, result, bdf_parsed, kh_put_status;
 
     result     = 0;
-    bdf_parsed = (sscanf(bdf, "%hx:%hhx:%hhx.%hhx", &bus_id.domain,
-                         &bus_id.bus, &bus_id.slot, &bus_id.function) == 4);
+    bdf_parsed = (sscanf(bdf, "%hx:%hhx:%hhx.%hhx", &bus_id.domain, &bus_id.bus,
+                         &bus_id.slot, &bus_id.function) == 4);
 
     if (bdf_parsed) {
         key     = ucs_topo_get_bus_id_bit_repr(&bus_id);
-        hash_it = kh_get(bridge_acs,
-                         &ucs_topo_global_ctx.acs.bridge_cache, key);
+        hash_it = kh_get(bridge_acs, &ucs_topo_global_ctx.acs.bridge_cache,
+                         key);
         if (hash_it != kh_end(&ucs_topo_global_ctx.acs.bridge_cache)) {
-            return kh_value(&ucs_topo_global_ctx.acs.bridge_cache, hash_it)
-                   == UCS_TOPO_ACS_BLOCKED;
+            return kh_value(&ucs_topo_global_ctx.acs.bridge_cache, hash_it) ==
+                   UCS_TOPO_ACS_BLOCKED;
         }
     }
 
@@ -1394,11 +1404,12 @@ out_free_path:
     ucs_free(path);
 out:
     if (bdf_parsed) {
-        hash_it = kh_put(bridge_acs, &ucs_topo_global_ctx.acs.bridge_cache,
-                         key, &kh_put_status);
+        hash_it = kh_put(bridge_acs, &ucs_topo_global_ctx.acs.bridge_cache, key,
+                         &kh_put_status);
         if (kh_put_status != UCS_KH_PUT_FAILED) {
-            kh_value(&ucs_topo_global_ctx.acs.bridge_cache, hash_it) = result
-                    ? UCS_TOPO_ACS_BLOCKED : UCS_TOPO_ACS_ALLOWED;
+            kh_value(&ucs_topo_global_ctx.acs.bridge_cache,
+                     hash_it) = result ? UCS_TOPO_ACS_BLOCKED :
+                                         UCS_TOPO_ACS_ALLOWED;
         }
     }
 
@@ -1492,23 +1503,12 @@ static int ucs_topo_check_acs_between_paths(const char *path1,
     return ucs_topo_check_acs_on_path(path2, common_len);
 }
 
-int ucs_topo_is_p2p_acs_enabled(ucs_sys_device_t sys_dev1,
-                                ucs_sys_device_t sys_dev2)
+static int ucs_topo_check_acs_between_devices(ucs_sys_device_t sys_dev1,
+                                              ucs_sys_device_t sys_dev2)
 {
-    ucs_topo_acs_status_t cached;
     char *path1, *path2, *common_path;
     ucs_status_t status;
     int result;
-
-    if ((sys_dev1 == UCS_SYS_DEVICE_ID_UNKNOWN) ||
-        (sys_dev2 == UCS_SYS_DEVICE_ID_UNKNOWN) || (sys_dev1 == sys_dev2)) {
-        return 0;
-    }
-
-    cached = ucs_topo_global_ctx.acs.pair_cache[sys_dev1][sys_dev2];
-    if (cached != UCS_TOPO_ACS_UNCHECKED) {
-        return cached == UCS_TOPO_ACS_BLOCKED;
-    }
 
     ucs_spin_lock(&ucs_topo_global_ctx.lock);
     status = ucs_topo_get_common_path(sys_dev1, sys_dev2, &path1, &path2,
@@ -1520,22 +1520,45 @@ int ucs_topo_is_p2p_acs_enabled(ucs_sys_device_t sys_dev1,
 
     result = ucs_topo_check_acs_between_paths(path1, path2, common_path);
 
-    ucs_topo_global_ctx.acs.pair_cache[sys_dev1][sys_dev2] = result
-            ? UCS_TOPO_ACS_BLOCKED : UCS_TOPO_ACS_ALLOWED;
-    ucs_topo_global_ctx.acs.pair_cache[sys_dev2][sys_dev1] =
-            ucs_topo_global_ctx.acs.pair_cache[sys_dev1][sys_dev2];
-
-    if (result) {
-        ucs_info("PCIe ACS is blocking P2P between %s and %s",
-                 ucs_topo_sys_device_get_name(sys_dev1),
-                 ucs_topo_sys_device_get_name(sys_dev2));
-    }
-
     ucs_free(common_path);
     ucs_free(path2);
     ucs_free(path1);
 
     return result;
+}
+
+static void ucs_topo_update_acs_for_new_device(ucs_sys_device_t new_dev,
+                                               unsigned num_existing)
+{
+    ucs_topo_acs_status_t acs_status;
+    ucs_sys_device_t existing;
+
+    for (existing = 0; existing < num_existing; ++existing) {
+        acs_status = ucs_topo_check_acs_between_devices(new_dev, existing) ?
+                             UCS_TOPO_ACS_BLOCKED :
+                             UCS_TOPO_ACS_ALLOWED;
+
+        ucs_topo_global_ctx.acs.pair_cache[new_dev][existing] = acs_status;
+        ucs_topo_global_ctx.acs.pair_cache[existing][new_dev] = acs_status;
+
+        if (acs_status == UCS_TOPO_ACS_BLOCKED) {
+            ucs_info("PCIe ACS is blocking P2P between %s and %s",
+                     ucs_topo_sys_device_get_name(new_dev),
+                     ucs_topo_sys_device_get_name(existing));
+        }
+    }
+}
+
+int ucs_topo_is_p2p_acs_enabled(ucs_sys_device_t sys_dev1,
+                                ucs_sys_device_t sys_dev2)
+{
+    if ((sys_dev1 == UCS_SYS_DEVICE_ID_UNKNOWN) ||
+        (sys_dev2 == UCS_SYS_DEVICE_ID_UNKNOWN) || (sys_dev1 == sys_dev2)) {
+        return 0;
+    }
+
+    return ucs_topo_global_ctx.acs.pair_cache[sys_dev1][sys_dev2] ==
+           UCS_TOPO_ACS_BLOCKED;
 }
 
 const char *ucs_topo_resolve_sysfs_path(const char *dev_path, char *path_buffer)
