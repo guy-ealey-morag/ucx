@@ -108,11 +108,29 @@ typedef struct {
 
 KHASH_MAP_INIT_INT64(bus_to_sys_dev, ucs_sys_device_t);
 
+typedef enum {
+    UCS_TOPO_ACS_UNCHECKED,
+    UCS_TOPO_ACS_ALLOWED,
+    UCS_TOPO_ACS_BLOCKED
+} ucs_topo_acs_status_t;
+
+typedef ucs_topo_acs_status_t
+        ucs_topo_acs_pair_cache_t[UCS_TOPO_MAX_SYS_DEVICES]
+                                 [UCS_TOPO_MAX_SYS_DEVICES];
+
+KHASH_MAP_INIT_INT64(bridge_acs, ucs_topo_acs_status_t);
+
+typedef struct {
+    ucs_topo_acs_pair_cache_t pair_cache;
+    khash_t(bridge_acs)       bridge_cache;
+} ucs_topo_acs_t;
+
 typedef struct ucs_topo_global_ctx {
     ucs_spinlock_t             lock;
     khash_t(bus_to_sys_dev)    bus_to_sys_dev_hash;
     ucs_topo_sys_device_info_t devices[UCS_TOPO_MAX_SYS_DEVICES];
     unsigned                   num_devices;
+    ucs_topo_acs_t             acs;
 } ucs_topo_global_ctx_t;
 
 
@@ -1313,13 +1331,28 @@ int ucs_topo_is_acs_p2p_blocking_in_config(const uint8_t *cfg_buf,
 
 static int ucs_topo_is_bridge_acs_blocking(const char *bdf)
 {
+    ucs_bus_id_bit_rep_t key = 0;
+    ucs_sys_bus_id_t bus_id;
     ucs_status_t status;
     uint8_t *cfg_buf;
     ssize_t nread;
+    khiter_t hash_it;
     char *path;
-    int fd, result;
+    int fd, result, bdf_parsed, kh_put_status;
 
-    result = 0;
+    result     = 0;
+    bdf_parsed = (sscanf(bdf, "%hx:%hhx:%hhx.%hhx", &bus_id.domain,
+                         &bus_id.bus, &bus_id.slot, &bus_id.function) == 4);
+
+    if (bdf_parsed) {
+        key     = ucs_topo_get_bus_id_bit_repr(&bus_id);
+        hash_it = kh_get(bridge_acs,
+                         &ucs_topo_global_ctx.acs.bridge_cache, key);
+        if (hash_it != kh_end(&ucs_topo_global_ctx.acs.bridge_cache)) {
+            return kh_value(&ucs_topo_global_ctx.acs.bridge_cache, hash_it)
+                   == UCS_TOPO_ACS_BLOCKED;
+        }
+    }
 
     status = ucs_string_alloc_path_buffer(&path, "acs_config_path");
     if (status != UCS_OK) {
@@ -1360,6 +1393,15 @@ out_close_fd:
 out_free_path:
     ucs_free(path);
 out:
+    if (bdf_parsed) {
+        hash_it = kh_put(bridge_acs, &ucs_topo_global_ctx.acs.bridge_cache,
+                         key, &kh_put_status);
+        if (kh_put_status != UCS_KH_PUT_FAILED) {
+            kh_value(&ucs_topo_global_ctx.acs.bridge_cache, hash_it) = result
+                    ? UCS_TOPO_ACS_BLOCKED : UCS_TOPO_ACS_ALLOWED;
+        }
+    }
+
     return result;
 }
 
@@ -1404,8 +1446,8 @@ static int ucs_topo_check_acs_on_path(const char *path, size_t common_len)
         memcpy(bdf, rel, bdf_len);
         bdf[bdf_len] = '\0';
 
-        /* Skip PCI root entries (e.g. "pci0000:c0") which are not BDFs */
-        if ((strncmp(bdf, "pci", 3) != 0) &&
+        /* Only check valid BDFs (contain '.'), skip PCI root entries */
+        if ((strchr(bdf, '.') != NULL) &&
             ucs_topo_is_bridge_acs_blocking(bdf)) {
             return 1;
         }
@@ -1453,6 +1495,7 @@ static int ucs_topo_check_acs_between_paths(const char *path1,
 int ucs_topo_is_p2p_acs_enabled(ucs_sys_device_t sys_dev1,
                                 ucs_sys_device_t sys_dev2)
 {
+    ucs_topo_acs_status_t cached;
     char *path1, *path2, *common_path;
     ucs_status_t status;
     int result;
@@ -1460,6 +1503,11 @@ int ucs_topo_is_p2p_acs_enabled(ucs_sys_device_t sys_dev1,
     if ((sys_dev1 == UCS_SYS_DEVICE_ID_UNKNOWN) ||
         (sys_dev2 == UCS_SYS_DEVICE_ID_UNKNOWN) || (sys_dev1 == sys_dev2)) {
         return 0;
+    }
+
+    cached = ucs_topo_global_ctx.acs.pair_cache[sys_dev1][sys_dev2];
+    if (cached != UCS_TOPO_ACS_UNCHECKED) {
+        return cached == UCS_TOPO_ACS_BLOCKED;
     }
 
     ucs_spin_lock(&ucs_topo_global_ctx.lock);
@@ -1471,6 +1519,11 @@ int ucs_topo_is_p2p_acs_enabled(ucs_sys_device_t sys_dev1,
     }
 
     result = ucs_topo_check_acs_between_paths(path1, path2, common_path);
+
+    ucs_topo_global_ctx.acs.pair_cache[sys_dev1][sys_dev2] = result
+            ? UCS_TOPO_ACS_BLOCKED : UCS_TOPO_ACS_ALLOWED;
+    ucs_topo_global_ctx.acs.pair_cache[sys_dev2][sys_dev1] =
+            ucs_topo_global_ctx.acs.pair_cache[sys_dev1][sys_dev2];
 
     if (result) {
         ucs_info("PCIe ACS is blocking P2P between %s and %s",
