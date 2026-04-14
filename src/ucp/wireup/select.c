@@ -24,7 +24,6 @@
 #define UCP_WIREUP_RMA_BW_TEST_MSG_SIZE    262144
 #define UCP_WIREUP_MAX_FLAGS_STRING_SIZE   50
 #define UCP_WIREUP_PATH_INDEX_UNDEFINED    UINT_MAX
-#define UCP_WIREUP_UCT_INFO_SIZE           256
 
 /* 6 for the string format constant length */
 #define UCP_WIREUP_TLS_INFO_SIZE       (UCP_WIREUP_UCT_INFO_SIZE + \
@@ -2746,6 +2745,18 @@ ucp_wireup_construct_lanes(const ucp_wireup_select_params_t *select_params,
             !ucp_wireup_is_built_in_keepalive(ep->worker, lane, select_params, key)) {
             ucs_assert(key->keepalive_lane == UCP_NULL_LANE);
             key->keepalive_lane = lane;
+        }
+    }
+
+    /* Failover mode: add AM type to all am_bw lanes so any can serve as
+     * fallback AM lane on lane failure (protocol selection requires
+     * UCP_LANE_TYPE_AM).
+     */
+    if (key->err_mode == UCP_ERR_HANDLING_MODE_FAILOVER) {
+        for (lane = 0; lane < key->num_lanes; ++lane) {
+            if (key->lanes[lane].lane_types & UCS_BIT(UCP_LANE_TYPE_AM_BW)) {
+                key->lanes[lane].lane_types |= UCS_BIT(UCP_LANE_TYPE_AM);
+            }
         }
     }
 
