@@ -1331,7 +1331,6 @@ static void ucp_add_tl_resource_if_enabled(
     }
 }
 
-
 static ucs_status_t
 ucp_add_tl_resources(ucp_context_h context, ucp_md_index_t md_index,
                      const ucp_config_t *config,

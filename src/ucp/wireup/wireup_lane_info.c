@@ -5,7 +5,7 @@
  */
 
 #ifdef HAVE_CONFIG_H
-#  include "config.h"
+#include "config.h"
 #endif
 
 #include "wireup_lane_info.h"
@@ -39,8 +39,8 @@ static int ucp_ep_lane_is_same_dev(const ucp_ep_config_key_t *key,
     return key->lanes[a].rsc_index == key->lanes[b].rsc_index;
 }
 
-static int ucp_ep_lane_is_dev_leader(const ucp_ep_config_key_t *key,
-                                     ucp_lane_index_t lane)
+static int
+ucp_ep_lane_is_dev_leader(const ucp_ep_config_key_t *key, ucp_lane_index_t lane)
 {
     ucp_lane_index_t j;
 
@@ -53,8 +53,8 @@ static int ucp_ep_lane_is_dev_leader(const ucp_ep_config_key_t *key,
 }
 
 static int ucp_ep_lane_is_same_tl(const ucp_ep_config_key_t *key,
-                                  ucp_context_h context,
-                                  ucp_lane_index_t a, ucp_lane_index_t b)
+                                  ucp_context_h context, ucp_lane_index_t a,
+                                  ucp_lane_index_t b)
 {
     if ((a == key->cm_lane) && (b == key->cm_lane)) {
         return 1;
@@ -62,31 +62,30 @@ static int ucp_ep_lane_is_same_tl(const ucp_ep_config_key_t *key,
     if ((a == key->cm_lane) || (b == key->cm_lane)) {
         return 0;
     }
-    return strcmp(
-            context->tl_rscs[key->lanes[a].rsc_index].tl_rsc.tl_name,
-            context->tl_rscs[key->lanes[b].rsc_index].tl_rsc.tl_name) == 0;
+    return strcmp(context->tl_rscs[key->lanes[a].rsc_index].tl_rsc.tl_name,
+                  context->tl_rscs[key->lanes[b].rsc_index].tl_rsc.tl_name) ==
+           0;
 }
 
-static void ucp_wireup_get_lane_names(const ucp_ep_config_key_t *key,
-                                      ucp_context_h context,
-                                      ucp_lane_index_t lane,
-                                      const char **tl_name_p,
-                                      const char **dev_name_p)
+static void
+ucp_wireup_get_lane_names(const ucp_ep_config_key_t *key, ucp_context_h context,
+                          ucp_lane_index_t lane, const char **tl_name_p,
+                          const char **dev_name_p)
 {
     if (lane == key->cm_lane) {
         *tl_name_p  = "cm";
         *dev_name_p = "cm";
     } else {
-        *tl_name_p  = context->tl_rscs[key->lanes[lane].rsc_index].tl_rsc.tl_name;
-        *dev_name_p = context->tl_rscs[key->lanes[lane].rsc_index].tl_rsc.dev_name;
+        *tl_name_p = context->tl_rscs[key->lanes[lane].rsc_index].tl_rsc.tl_name;
+        *dev_name_p =
+                context->tl_rscs[key->lanes[lane].rsc_index].tl_rsc.dev_name;
     }
 }
 
-static void ucp_wireup_format_lane_dev(const ucp_ep_config_key_t *key,
-                                       ucp_context_h context,
-                                       ucp_lane_index_t lane,
-                                       const char *dev_name,
-                                       char *buf, size_t buf_size)
+static void
+ucp_wireup_format_lane_dev(const ucp_ep_config_key_t *key,
+                           ucp_context_h context, ucp_lane_index_t lane,
+                           const char *dev_name, char *buf, size_t buf_size)
 {
     const char *sysdev_name;
 
@@ -94,8 +93,7 @@ static void ucp_wireup_format_lane_dev(const ucp_ep_config_key_t *key,
         (context->tl_rscs[key->lanes[lane].rsc_index].tl_rsc.sys_device !=
          UCS_SYS_DEVICE_ID_UNKNOWN)) {
         sysdev_name = ucs_topo_sys_device_get_name(
-                context->tl_rscs[key->lanes[lane].rsc_index]
-                        .tl_rsc.sys_device);
+                context->tl_rscs[key->lanes[lane].rsc_index].tl_rsc.sys_device);
         if (sysdev_name != NULL) {
             snprintf(buf, buf_size, "%s (%s)", dev_name, sysdev_name);
         } else {
@@ -202,16 +200,15 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
             continue;
         }
 
-        ucp_wireup_get_lane_names(key, context, lane,
-                                  &tl_name, &dev_name);
+        ucp_wireup_get_lane_names(key, context, lane, &tl_name, &dev_name);
 
         len = strlen(tl_name);
         if (len > tl_width) {
             tl_width = len;
         }
 
-        ucp_wireup_format_lane_dev(key, context, lane,
-                                   dev_name, dev_buf, sizeof(dev_buf));
+        ucp_wireup_format_lane_dev(key, context, lane, dev_name, dev_buf,
+                                   sizeof(dev_buf));
 
         len = strlen(dev_buf);
         if (len > dev_width) {
@@ -229,18 +226,17 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
 
     if (!ucs_string_is_empty(context->name)) {
         snprintf(title_buf, sizeof(title_buf),
-                 "Endpoint Config #%d (ctx: %s, type: %s)",
-                 cfg_index, context->name, ep_type);
+                 "Endpoint Config #%d (ctx: %s, type: %s)", cfg_index,
+                 context->name, ep_type);
     } else {
-        snprintf(title_buf, sizeof(title_buf),
-                 "Endpoint Config #%d (type: %s)", cfg_index, ep_type);
+        snprintf(title_buf, sizeof(title_buf), "Endpoint Config #%d (type: %s)",
+                 cfg_index, ep_type);
     }
     total_width = tl_width + dev_width + count_width + types_width + 9;
 
-    ucs_string_buffer_appendf(&strb, "+-%.*s-+\n",
-                              (int)total_width, UCP_EP_LANE_INFO_DASHES);
-    ucs_string_buffer_appendf(&strb, "| %-*s |\n",
-                              (int)total_width, title_buf);
+    ucs_string_buffer_appendf(&strb, "+-%.*s-+\n", (int)total_width,
+                              UCP_EP_LANE_INFO_DASHES);
+    ucs_string_buffer_appendf(&strb, "| %-*s |\n", (int)total_width, title_buf);
     UCP_LANE_INFO_LOG_SEP();
     ucs_string_buffer_appendf(&strb, UCP_EP_LANE_INFO_ROW_FMT "\n",
                               (int)tl_width, UCP_EP_LANE_INFO_HDR_TL,
@@ -271,19 +267,17 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
             UCP_LANE_INFO_LOG_SEP();
         }
 
-        ucp_wireup_get_lane_names(key, context, lane,
-                                  &tl_name, &dev_name);
-        ucp_wireup_format_lane_dev(key, context, lane,
-                                   dev_name, dev_buf, sizeof(dev_buf));
+        ucp_wireup_get_lane_names(key, context, lane, &tl_name, &dev_name);
+        ucp_wireup_format_lane_dev(key, context, lane, dev_name, dev_buf,
+                                   sizeof(dev_buf));
 
         types_union = ucp_wireup_collect_lane_types(key, lane, &count);
         ucp_wireup_format_lane_types(types_union, types_buf, sizeof(types_buf));
 
         ucs_string_buffer_appendf(&strb, "| %-*s | %-*s | %*d | %-*s |\n",
                                   (int)tl_width, first_tl ? tl_name : "",
-                                  (int)dev_width, dev_buf,
-                                  (int)count_width, count,
-                                  (int)types_width, types_buf);
+                                  (int)dev_width, dev_buf, (int)count_width,
+                                  count, (int)types_width, types_buf);
 
         printed_any = 1;
     }
