@@ -11,21 +11,27 @@
 #include "wireup_lane_info.h"
 
 #include <ucp/proto/lane_type.h>
-#include <ucs/debug/log.h>
 #include <ucs/datastruct/string_buffer.h>
-#include <ucs/sys/topo/base/topo.h>
+#include <ucs/debug/log.h>
+#include <ucs/debug/log_table.h>
 #include <ucs/sys/string.h>
+#include <ucs/sys/topo/base/topo.h>
 #include <string.h>
 
 
-#define UCP_EP_LANE_INFO_DASHES \
-    "------------------------------------------------------------------------" \
-    "------------------------------------------------------------------------"
-#define UCP_EP_LANE_INFO_ROW_FMT   "| %-*s | %-*s | %-*s | %-*s |"
 #define UCP_EP_LANE_INFO_HDR_TL    "Transport"
 #define UCP_EP_LANE_INFO_HDR_DEV   "Device (Sys. dev.)"
 #define UCP_EP_LANE_INFO_HDR_COUNT "# Lanes"
 #define UCP_EP_LANE_INFO_HDR_TYPES "Lane Types"
+
+/* Column indices in the widths[] / cells[] arrays */
+enum {
+    UCP_EP_LANE_INFO_COL_TL,
+    UCP_EP_LANE_INFO_COL_DEV,
+    UCP_EP_LANE_INFO_COL_COUNT,
+    UCP_EP_LANE_INFO_COL_TYPES,
+    UCP_EP_LANE_INFO_NUM_COLS
+};
 
 static int ucp_ep_lane_is_same_dev(const ucp_ep_config_key_t *key,
                                    ucp_lane_index_t a, ucp_lane_index_t b)
@@ -153,18 +159,20 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
                              const ucp_ep_config_key_t *key,
                              ucp_worker_cfg_index_t cfg_index)
 {
-    ucp_context_h context = worker->context;
+    ucp_context_h context    = worker->context;
+    ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
     ucp_lane_index_t lane, j;
     ucp_lane_type_mask_t types_union;
     size_t tl_width, dev_width, count_width, types_width;
-    size_t len, total_width;
+    size_t len;
+    int widths[UCP_EP_LANE_INFO_NUM_COLS];
+    const char *cells[UCP_EP_LANE_INFO_NUM_COLS];
     const char *tl_name, *dev_name, *ep_type;
     char title_buf[96];
     char types_buf[128];
     char dev_buf[128];
+    char count_buf[16];
     int count, first_tl, printed_any;
-    ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
-    char *line;
 
     if (!ucs_log_is_enabled(UCS_LOG_LEVEL_INFO)) {
         return;
@@ -182,17 +190,6 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
     dev_width   = strlen(UCP_EP_LANE_INFO_HDR_DEV);
     count_width = strlen(UCP_EP_LANE_INFO_HDR_COUNT);
     types_width = strlen(UCP_EP_LANE_INFO_HDR_TYPES);
-
-/*
- * Scoped macro: emits a 4-column separator line using the local
- * column-width variables. Defined here and #undef'd at end of function.
- */
-#define UCP_LANE_INFO_LOG_SEP() \
-    ucs_string_buffer_appendf(&strb, "+-%.*s-+-%.*s-+-%.*s-+-%.*s-+\n", \
-                              (int)tl_width, UCP_EP_LANE_INFO_DASHES, \
-                              (int)dev_width, UCP_EP_LANE_INFO_DASHES, \
-                              (int)count_width, UCP_EP_LANE_INFO_DASHES, \
-                              (int)types_width, UCP_EP_LANE_INFO_DASHES)
 
     /* Pass 1: compute column widths */
     for (lane = 0; lane < key->num_lanes; ++lane) {
@@ -232,18 +229,23 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
         snprintf(title_buf, sizeof(title_buf), "Endpoint Config #%d (type: %s)",
                  cfg_index, ep_type);
     }
-    total_width = tl_width + dev_width + count_width + types_width + 9;
 
-    ucs_string_buffer_appendf(&strb, "+-%.*s-+\n", (int)total_width,
-                              UCP_EP_LANE_INFO_DASHES);
-    ucs_string_buffer_appendf(&strb, "| %-*s |\n", (int)total_width, title_buf);
-    UCP_LANE_INFO_LOG_SEP();
-    ucs_string_buffer_appendf(&strb, UCP_EP_LANE_INFO_ROW_FMT "\n",
-                              (int)tl_width, UCP_EP_LANE_INFO_HDR_TL,
-                              (int)dev_width, UCP_EP_LANE_INFO_HDR_DEV,
-                              (int)count_width, UCP_EP_LANE_INFO_HDR_COUNT,
-                              (int)types_width, UCP_EP_LANE_INFO_HDR_TYPES);
-    UCP_LANE_INFO_LOG_SEP();
+    widths[UCP_EP_LANE_INFO_COL_TL]    = (int)tl_width;
+    widths[UCP_EP_LANE_INFO_COL_DEV]   = (int)dev_width;
+    widths[UCP_EP_LANE_INFO_COL_COUNT] = (int)count_width;
+    widths[UCP_EP_LANE_INFO_COL_TYPES] = (int)types_width;
+
+    ucs_log_table_append_title(&strb, title_buf, widths,
+                               UCP_EP_LANE_INFO_NUM_COLS);
+    ucs_log_table_append_separator(&strb, widths, UCP_EP_LANE_INFO_NUM_COLS, 0,
+                                   UCS_LOG_TABLE_LCORNER_SEP);
+    cells[UCP_EP_LANE_INFO_COL_TL]    = UCP_EP_LANE_INFO_HDR_TL;
+    cells[UCP_EP_LANE_INFO_COL_DEV]   = UCP_EP_LANE_INFO_HDR_DEV;
+    cells[UCP_EP_LANE_INFO_COL_COUNT] = UCP_EP_LANE_INFO_HDR_COUNT;
+    cells[UCP_EP_LANE_INFO_COL_TYPES] = UCP_EP_LANE_INFO_HDR_TYPES;
+    ucs_log_table_append_row(&strb, cells, widths, UCP_EP_LANE_INFO_NUM_COLS);
+    ucs_log_table_append_separator(&strb, widths, UCP_EP_LANE_INFO_NUM_COLS, 0,
+                                   UCS_LOG_TABLE_LCORNER_SEP);
 
     /* Pass 2: print rows grouped by transport */
     printed_any = 0;
@@ -264,7 +266,9 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
         }
 
         if (first_tl && printed_any) {
-            UCP_LANE_INFO_LOG_SEP();
+            ucs_log_table_append_separator(&strb, widths,
+                                           UCP_EP_LANE_INFO_NUM_COLS, 0,
+                                           UCS_LOG_TABLE_LCORNER_SEP);
         }
 
         ucp_wireup_get_lane_names(key, context, lane, &tl_name, &dev_name);
@@ -274,19 +278,20 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
         types_union = ucp_wireup_collect_lane_types(key, lane, &count);
         ucp_wireup_format_lane_types(types_union, types_buf, sizeof(types_buf));
 
-        ucs_string_buffer_appendf(&strb, "| %-*s | %-*s | %*d | %-*s |\n",
-                                  (int)tl_width, first_tl ? tl_name : "",
-                                  (int)dev_width, dev_buf, (int)count_width,
-                                  count, (int)types_width, types_buf);
+        snprintf(count_buf, sizeof(count_buf), "%d", count);
+
+        cells[UCP_EP_LANE_INFO_COL_TL]    = first_tl ? tl_name : "";
+        cells[UCP_EP_LANE_INFO_COL_DEV]   = dev_buf;
+        cells[UCP_EP_LANE_INFO_COL_COUNT] = count_buf;
+        cells[UCP_EP_LANE_INFO_COL_TYPES] = types_buf;
+        ucs_log_table_append_row(&strb, cells, widths,
+                                 UCP_EP_LANE_INFO_NUM_COLS);
 
         printed_any = 1;
     }
 
-    UCP_LANE_INFO_LOG_SEP();
-
-    ucs_string_buffer_for_each_token(line, &strb, "\n") {
-        ucs_log_print_compact(line);
-    }
+    ucs_log_table_append_separator(&strb, widths, UCP_EP_LANE_INFO_NUM_COLS, 0,
+                                   UCS_LOG_TABLE_LCORNER_SEP);
+    ucs_log_print_compact_lines(&strb);
     ucs_string_buffer_cleanup(&strb);
-#undef UCP_LANE_INFO_LOG_SEP
 }

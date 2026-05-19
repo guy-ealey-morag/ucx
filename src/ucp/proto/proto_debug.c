@@ -14,6 +14,7 @@
 #include <ucp/am/ucp_am.inl>
 #include <ucp/rndv/proto_rndv.h>
 #include <ucs/arch/atomic.h>
+#include <ucs/debug/log_table.h>
 #include <fnmatch.h>
 #include <ctype.h>
 
@@ -1104,14 +1105,10 @@ void ucp_proto_select_elem_trace(ucp_worker_h worker,
     ucp_worker_cfg_index_t ep_cfg_index    = proto_config->ep_cfg_index;
     ucp_worker_cfg_index_t rkey_cfg_index  = proto_config->rkey_cfg_index;
     ucs_string_buffer_t strb               = UCS_STRING_BUFFER_INITIALIZER;
-    char *line;
 
     /* Print human-readable protocol selection table to the log */
     ucp_proto_select_elem_info(worker, ep_cfg_index, rkey_cfg_index,
                                select_param, select_elem, 0, show_used, &strb);
-    ucs_string_buffer_for_each_token(line, &strb, "\n") {
-        ucs_log_print_compact(line);
-    }
-
+    ucs_log_print_compact_lines(&strb);
     ucs_string_buffer_cleanup(&strb);
 }

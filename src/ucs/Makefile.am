@@ -1,5 +1,5 @@
 #
-# Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2001-2014. ALL RIGHTS RESERVED.
+# Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2001-2026. ALL RIGHTS RESERVED.
 # Copyright (C) UT-Battelle, LLC. 2014-2017. ALL RIGHTS RESERVED.
 # Copyright (C) ARM Ltd. 2016-2017.  ALL RIGHTS RESERVED.
 # Copyright (C) Tactical Computing Labs, LLC. 2022. ALL RIGHTS RESERVED.
@@ -50,6 +50,7 @@ nobase_dist_libucs_la_HEADERS = \
 	datastruct/string_buffer.h \
 	datastruct/string_set.h \
 	debug/log_def.h \
+	debug/log_table.h \
 	debug/debug.h \
 	debug/memtrack.h \
 	memory/rcache.h \
@@ -192,6 +193,7 @@ libucs_la_SOURCES = \
 	debug/assert.c \
 	debug/debug.c \
 	debug/log.c \
+	debug/log_table.c \
 	debug/memtrack.c \
 	memory/memory_type.c \
 	memory/memtype_cache.c \
