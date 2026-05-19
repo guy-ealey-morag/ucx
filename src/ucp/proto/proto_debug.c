@@ -14,7 +14,7 @@
 #include <ucp/am/ucp_am.inl>
 #include <ucp/rndv/proto_rndv.h>
 #include <ucs/arch/atomic.h>
-#include <ucs/debug/log_table.h>
+#include <ucs/debug/table.h>
 #include <fnmatch.h>
 #include <ctype.h>
 
@@ -62,16 +62,6 @@ struct ucp_proto_perf_node {
         ucs_array_s(unsigned, ucp_proto_perf_node_data_t) data;
     };
 };
-
-/* Protocol information table */
-typedef struct {
-    char counter_str[32];
-    char range_str[32];
-    char desc[UCP_PROTO_DESC_STR_MAX];
-    char config[UCP_PROTO_CONFIG_STR_MAX];
-} ucp_proto_info_row_t;
-UCS_ARRAY_DECLARE_TYPE(ucp_proto_info_table_t, unsigned, ucp_proto_info_row_t);
-
 
 void ucp_proto_select_perf_str(const ucs_linear_func_t *perf, char *time_str,
                                size_t time_str_max, char *bw_str,
@@ -143,20 +133,6 @@ ucp_proto_select_param_dump(ucp_worker_h worker,
                               operation_names, select_param_strb);
 }
 
-static void ucp_proto_table_row_separator(ucs_string_buffer_t *strb,
-                                          const int *column_width,
-                                          unsigned num_columns)
-{
-    unsigned i;
-
-    ucs_string_buffer_appendc(strb, '+', 1);
-    for (i = 0; i < num_columns; ++i) {
-        ucs_string_buffer_appendc(strb, '-', column_width[i] + 2);
-        ucs_string_buffer_appendc(strb, '+', 1);
-    }
-    ucs_string_buffer_appendc(strb, '\n', 1);
-}
-
 static int ucp_proto_debug_is_info_enabled(ucp_context_h context,
                                            const char *select_param_str,
                                            int show_used)
@@ -196,30 +172,6 @@ ucp_proto_select_elem_has_selections(const ucp_proto_select_elem_t *select_elem)
     return 0;
 }
 
-static void
-ucp_proto_selections_dump(ucp_worker_h worker,
-                          const ucp_proto_query_attr_t *proto_attr,
-                          const ucp_proto_select_param_t *select_param,
-                          char *counter_str, size_t size, int show_used)
-{
-    ucp_operation_id_t op_id;
-
-    if (!show_used) {
-        *counter_str = '\0';
-        return;
-    }
-
-    /* Short active messages protocol selections are not counted */
-    op_id = ucp_proto_select_op_id(select_param);
-    if ((op_id == UCP_OP_ID_AM_SEND || op_id == UCP_OP_ID_AM_SEND_REPLY) &&
-        strstr(proto_attr->desc, "short") != NULL) {
-        ucs_assert(proto_attr->selections == 0);
-        *counter_str = '\0';
-        return;
-    }
-
-    ucs_snprintf_safe(counter_str, size, "%u  ", proto_attr->selections);
-}
 
 void
 ucp_proto_select_elem_info(ucp_worker_h worker,
@@ -231,12 +183,12 @@ ucp_proto_select_elem_info(ucp_worker_h worker,
 {
     UCS_STRING_BUFFER_ONSTACK(ep_cfg_strb, UCP_PROTO_CONFIG_STR_MAX);
     UCS_STRING_BUFFER_ONSTACK(sel_param_strb, UCP_PROTO_CONFIG_STR_MAX);
-    static const char *info_row_fmt = "| %s%*s | %-*s | %-*s |\n";
-    ucp_proto_info_table_t table;
-    int hdr_col_width[2], col_width[3];
     ucp_proto_query_attr_t proto_attr;
-    ucp_proto_info_row_t *row_elem;
+    ucs_table_t table;
+    ucs_table_row_t *row;
+    ucs_table_cell_t *range_cell;
     size_t range_start, range_end;
+    char range_str[32];
     int proto_valid;
 
     if (show_used && !ucp_proto_select_elem_has_selections(select_elem)) {
@@ -253,12 +205,17 @@ ucp_proto_select_elem_info(ucp_worker_h worker,
         return;
     }
 
-    /* Populate the table and column widths */
-    ucs_array_init_dynamic(&table);
-    col_width[0] = ucs_string_buffer_length(&ep_cfg_strb);
-    col_width[1] = 0;
-    col_width[2] = 0;
-    range_end    = -1;
+    ucs_table_init(&table, 3);
+
+    row = ucs_table_add_row(&table);
+    ucs_table_row_add_cell_left(row, 1, "%s",
+                                ucs_string_buffer_cstr(&ep_cfg_strb));
+    ucs_table_row_add_cell_left(row, 2, "%s",
+                                ucs_string_buffer_cstr(&sel_param_strb));
+    ucs_table_add_separator(&table);
+
+    /* One body row per valid protocol range. */
+    range_end = -1;
     do {
         range_start = range_end + 1;
         proto_valid = ucp_proto_select_elem_query(worker, select_elem,
@@ -269,53 +226,26 @@ ucp_proto_select_elem_info(ucp_worker_h worker,
             continue;
         }
 
-        row_elem = ucs_array_append(&table, break);
+        row = ucs_table_add_row(&table);
 
-        ucs_snprintf_safe(row_elem->desc, sizeof(row_elem->desc), "%s%s",
-                          proto_attr.is_estimation ? "(?) " : "",
-                          proto_attr.desc);
-        ucs_strncpy_safe(row_elem->config, proto_attr.config,
-                         sizeof(row_elem->config));
+        /* First body cell holds an optional selection counter (left-
+         * anchored) and the range string (right-anchored). */
+        ucs_memunits_range_str(range_start, range_end, range_str,
+                               sizeof(range_str));
+        range_cell = ucs_table_row_add_cell_right(row, 1, "%s", range_str);
+        if (show_used) {
+            ucs_table_cell_appendf_left(range_cell, "%u  ",
+                                        proto_attr.selections);
+        }
 
-        ucs_memunits_range_str(range_start, range_end, row_elem->range_str,
-                               sizeof(row_elem->range_str));
-
-        ucp_proto_selections_dump(worker, &proto_attr, select_param,
-                                  row_elem->counter_str,
-                                  sizeof(row_elem->counter_str), show_used);
-
-        col_width[0] = ucs_max(col_width[0], strlen(row_elem->counter_str) +
-                                             strlen(row_elem->range_str));
-        col_width[1] = ucs_max(col_width[1], strlen(row_elem->desc));
-        col_width[2] = ucs_max(col_width[2], strlen(row_elem->config));
+        ucs_table_row_add_cell_left(row, 1, "%s%s",
+                                    proto_attr.is_estimation ? "(?) " : "",
+                                    proto_attr.desc);
+        ucs_table_row_add_cell_left(row, 1, "%s", proto_attr.config);
     } while (range_end != SIZE_MAX);
 
-    /* Resize column[1] to match longest row including header */
-    col_width[1] = ucs_max(col_width[1],
-                           (int)ucs_string_buffer_length(&sel_param_strb) -
-                                   col_width[2]);
-
-    /* Print header */
-    hdr_col_width[0] = col_width[0];
-    hdr_col_width[1] = col_width[1] + 3 + col_width[2];
-    ucp_proto_table_row_separator(strb, hdr_col_width, 2);
-    ucs_string_buffer_appendf(strb, "| %*s | %-*s |\n", hdr_col_width[0],
-                              ucs_string_buffer_cstr(&ep_cfg_strb),
-                              hdr_col_width[1],
-                              ucs_string_buffer_cstr(&sel_param_strb));
-
-    /* Print contents */
-    ucp_proto_table_row_separator(strb, col_width, 3);
-    ucs_array_for_each(row_elem, &table) {
-        ucs_string_buffer_appendf(strb, info_row_fmt, row_elem->counter_str,
-                                  col_width[0] - strlen(row_elem->counter_str),
-                                  row_elem->range_str, col_width[1],
-                                  row_elem->desc, col_width[2],
-                                  row_elem->config);
-    }
-    ucp_proto_table_row_separator(strb, col_width, 3);
-
-    ucs_array_cleanup_dynamic(&table);
+    ucs_table_render(&table, strb);
+    ucs_table_cleanup(&table);
 }
 
 void ucp_proto_select_info(ucp_worker_h worker,

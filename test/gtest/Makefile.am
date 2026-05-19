@@ -212,7 +212,7 @@ gtest_SOURCES = \
 	ucs/test_frag_list.cc \
 	ucs/test_type.cc \
 	ucs/test_log.cc \
-	ucs/test_log_table.cc \
+	ucs/test_table.cc \
 	ucs/test_iov.cc \
 	ucs/test_vfs.cc \
 	ucs/arch/test_x86_64.cc

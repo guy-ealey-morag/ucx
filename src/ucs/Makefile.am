@@ -50,7 +50,7 @@ nobase_dist_libucs_la_HEADERS = \
 	datastruct/string_buffer.h \
 	datastruct/string_set.h \
 	debug/log_def.h \
-	debug/log_table.h \
+	debug/table.h \
 	debug/debug.h \
 	debug/memtrack.h \
 	memory/rcache.h \
@@ -193,7 +193,7 @@ libucs_la_SOURCES = \
 	debug/assert.c \
 	debug/debug.c \
 	debug/log.c \
-	debug/log_table.c \
+	debug/table.c \
 	debug/memtrack.c \
 	memory/memory_type.c \
 	memory/memtype_cache.c \
