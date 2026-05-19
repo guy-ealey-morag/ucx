@@ -490,3 +490,63 @@ UCS_TEST_F(test_table, row_prefix_can_be_cleared_back_to_null) {
               "+-----+\n",
               table.render());
 }
+
+
+/* Group J: equal_widths */
+
+UCS_TEST_F(test_table, equal_widths_default_disabled_uses_per_column_widths) {
+    /* Without ucs_table_set_equal_widths, each body column keeps its
+     * own per-column width. Regression guard against accidental
+     * normalization. */
+    table_t table(3);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_left(row, 1, "%s", "a");
+    ucs_table_row_add_cell_left(row, 1, "%s", "longer");
+    ucs_table_row_add_cell_left(row, 1, "%s", "xy");
+
+    EXPECT_EQ("+---+--------+----+\n"
+              "| a | longer | xy |\n"
+              "+---+--------+----+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table, equal_widths_normalizes_all_columns_to_max) {
+    /* Per-column widths from the row are {1, 6, 2}. With equal_widths
+     * enabled, render() picks max=6 and widens every column to 6 so
+     * the short cells pad out to match the widest one. */
+    table_t table(3);
+    ucs_table_set_equal_widths(table.get(), 1);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_left(row, 1, "%s", "a");
+    ucs_table_row_add_cell_left(row, 1, "%s", "longer");
+    ucs_table_row_add_cell_left(row, 1, "%s", "xy");
+
+    EXPECT_EQ("+--------+--------+--------+\n"
+              "| a      | longer | xy     |\n"
+              "+--------+--------+--------+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table, equal_widths_with_col_span_propagates_post_expansion) {
+    /* Pass 1 picks widths {2, 2} from the second row. Pass 2 expands
+     * widths[1] to absorb the merged 23-char header => widths become
+     * {2, 18}. Equal-widths then normalizes both to 18, so the second
+     * row's two cells render at the wider column width. */
+    table_t table(2);
+    ucs_table_set_equal_widths(table.get(), 1);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_left(row, 2, "%s", "this header is too wide");
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_left(row, 1, "%s", "ab");
+    ucs_table_row_add_cell_left(row, 1, "%s", "cd");
+
+    EXPECT_EQ("+--------------------+--------------------+\n"
+              "| this header is too wide                 |\n"
+              "| ab                 | cd                 |\n"
+              "+--------------------+--------------------+\n",
+              table.render());
+}

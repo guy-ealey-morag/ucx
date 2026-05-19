@@ -54,9 +54,10 @@ typedef enum {
 
 void ucs_table_init(ucs_table_t *table, unsigned n_body_cols)
 {
-    table->n_body_cols = n_body_cols;
-    table->row_prefix  = NULL;
-    table->widths      = NULL;
+    table->n_body_cols  = n_body_cols;
+    table->row_prefix   = NULL;
+    table->widths       = NULL;
+    table->equal_widths = 0;
     ucs_array_init_dynamic(&table->entries);
     ucs_array_init_dynamic(&table->row_handles);
 }
@@ -65,6 +66,12 @@ void ucs_table_init(ucs_table_t *table, unsigned n_body_cols)
 void ucs_table_set_row_prefix(ucs_table_t *table, const char *prefix)
 {
     table->row_prefix = prefix;
+}
+
+
+void ucs_table_set_equal_widths(ucs_table_t *table, int equal_widths)
+{
+    table->equal_widths = equal_widths;
 }
 
 
@@ -319,6 +326,19 @@ static void ucs_table_compute_widths(const ucs_table_t *table, int *widths)
                 }
             }
             body_col += cell->col_span;
+        }
+    }
+
+    /* Equal-width pass: widen every body column to the maximum so all
+     * columns render at the same width. Runs after pass 2 so it only
+     * ever widens columns and never invalidates merged-cell fits. */
+    if (table->equal_widths) {
+        int max_width = 0;
+        for (i = 0; i < table->n_body_cols; ++i) {
+            max_width = ucs_max(max_width, widths[i]);
+        }
+        for (i = 0; i < table->n_body_cols; ++i) {
+            widths[i] = max_width;
         }
     }
 }

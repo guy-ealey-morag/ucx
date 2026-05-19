@@ -104,6 +104,10 @@ typedef struct ucs_table {
     /* Internal scratch: per-body-column widths, allocated for the
      * duration of a ucs_table_render() call and NULL otherwise. */
     int                     *widths;
+    /* When non-zero, ucs_table_render() normalizes every body-column
+     * width to the maximum computed width, producing uniformly-wide
+     * columns. Default: 0 (per-column widths). */
+    int                     equal_widths;
 } ucs_table_t;
 
 
@@ -133,6 +137,15 @@ void ucs_table_cleanup(ucs_table_t *table);
  * sequence of comment lines.
  */
 void ucs_table_set_row_prefix(ucs_table_t *table, const char *prefix);
+
+
+/*
+ * Enable or disable equal-width rendering. When `equal_widths` is
+ * non-zero, ucs_table_render() expands every body column to the
+ * maximum computed width so all columns render at the same width.
+ * Default: disabled.
+ */
+void ucs_table_set_equal_widths(ucs_table_t *table, int equal_widths);
 
 
 /*

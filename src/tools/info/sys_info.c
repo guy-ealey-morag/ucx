@@ -92,10 +92,15 @@ static void print_sys_topo_distances(unsigned num_devices)
 
     ucs_table_init(&table, 1 + num_devices);
     ucs_table_set_row_prefix(&table, "# ");
+    ucs_table_set_equal_widths(&table, 1);
 
     print_sys_topo_add_header(&table, "MB/s", num_devices);
 
     for (sys_dev1 = 0; sys_dev1 < num_devices; ++sys_dev1) {
+        if (sys_dev1 > 0) {
+            ucs_table_add_separator(&table);
+        }
+
         row = ucs_table_add_row(&table);
         ucs_table_row_add_cell_right(row, 1, "%s",
                                      ucs_topo_sys_device_get_name(sys_dev1));
@@ -135,6 +140,7 @@ static void print_sys_topo_memory_latency(unsigned num_devices)
 
     ucs_table_init(&table, 1 + num_devices);
     ucs_table_set_row_prefix(&table, "# ");
+    ucs_table_set_equal_widths(&table, 1);
 
     print_sys_topo_add_header(&table, "device", num_devices);
 
