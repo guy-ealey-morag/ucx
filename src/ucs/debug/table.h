@@ -75,7 +75,7 @@ BEGIN_C_DECLS
  *
  *   After ucs_table_render() (or ucs_table_print()), the caller can
  *   open ucs_table_stream_row_create() handles and use the regular
- *   ucs_table_row_add_cell() / ucs_table_cell_appendf() API to
+ *   ucs_table_row_add_cell() / ucs_table_row_add_cell_fmt() API to
  *   populate them, then call ucs_table_print_row() to emit each row
  *   using the table's already-computed widths. Streamed rows are not stored in the table's
  *   entries; they are owned by the caller and must be released with
@@ -283,9 +283,8 @@ ucs_table_row_t *ucs_table_add_row(ucs_table_t *table);
 
 
 /*
- * Add an empty cell with the given alignment and return a handle that
- * can be passed to ucs_table_cell_appendf() to populate the cell, or
- * used as-is as an empty/carry-over cell. The handle is valid for the
+ * Add an empty cell with the given alignment and return a handle. The
+ * cell is rendered as empty/carry-over; the handle is valid for the
  * lifetime of the table.
  */
 ucs_table_cell_t *ucs_table_row_add_cell(ucs_table_row_t *row,
@@ -294,27 +293,14 @@ ucs_table_cell_t *ucs_table_row_add_cell(ucs_table_row_t *row,
 
 
 /*
- * One-shot: add a cell with the given alignment and printf-style
- * content. The cell is owned by the table; no handle is returned.
- * Preferred form for cells whose content is fully known at the call
- * site. Equivalent to ucs_table_row_add_cell + ucs_table_cell_appendf.
+ * Add a cell with the given alignment and printf-style content. The
+ * cell is owned by the table; no handle is returned.
  *
- * The same '\n' / '\t' policy as ucs_table_cell_appendf() applies to
- * the formatted result.
+ * Asserts that the formatted result never contains '\n'.
  */
 void ucs_table_row_add_cell_fmt(ucs_table_row_t *row, unsigned col_span,
                                 ucs_table_align_t align, const char *fmt, ...)
         UCS_F_PRINTF(4, 5);
-
-
-/*
- * Append printf-style content to a cell handle returned by
- * ucs_table_row_add_cell(). Multiple calls concatenate.
- *
- * Asserts that the resulting buffer never contains '\n' or '\t'.
- */
-void ucs_table_cell_appendf(ucs_table_cell_t *cell, const char *fmt, ...)
-        UCS_F_PRINTF(2, 3);
 
 
 /*
@@ -343,7 +329,7 @@ void ucs_table_print(ucs_table_t *table);
  * ucs_table_stream_row_destroy().
  *
  * Cells are populated via the regular ucs_table_row_add_cell() /
- * ucs_table_cell_appendf() API. The row is then printed with
+ * ucs_table_row_add_cell_fmt() API. The row is then printed with
  * ucs_table_print_row() (or ucs_table_render_row()) against the
  * table's column widths.
  *

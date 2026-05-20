@@ -432,25 +432,6 @@ UCS_TEST_F(test_table, col_span_grows_rightmost_body_column_when_needed) {
 }
 
 
-/* Group F: incremental cell construction */
-
-UCS_TEST_F(test_table, cell_appendf_concatenates_multiple_calls) {
-    /* cell_appendf supports calling more than once to build the cell
-     * content incrementally. */
-    table_t table(1);
-
-    auto *row  = ucs_table_add_row(table.get());
-    auto *cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
-    ucs_table_cell_appendf(cell, "%s", "hello");
-    ucs_table_cell_appendf(cell, "-%s", "world");
-
-    EXPECT_EQ("+-------------+\n"
-              "| hello-world |\n"
-              "+-------------+\n",
-              table.render());
-}
-
-
 /* Group G: printf formatting goes through unchanged */
 
 UCS_TEST_F(test_table, printf_formatting_supported_by_all_alignments) {
@@ -459,10 +440,9 @@ UCS_TEST_F(test_table, printf_formatting_supported_by_all_alignments) {
      * which leaves visible padding around the centered cell. */
     table_t table(2);
 
-    auto *row  = ucs_table_add_row(table.get());
-    auto *cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_CENTER);
-    ucs_table_cell_appendf(cell, "%d", 42);
-    ucs_table_cell_appendf(cell, " %s..%s", "lo", "hi");
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%d %s..%s", 42,
+                               "lo", "hi");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s=%u", "k", 7u);
 
     row = ucs_table_add_row(table.get());

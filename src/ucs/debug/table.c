@@ -268,44 +268,21 @@ ucs_table_cell_t *ucs_table_row_add_cell(ucs_table_row_t *row,
 }
 
 
-/* Post-format invariants for cell content. Asserts that the buffer
- * contains neither '\n' nor '\t'. Shared between
- * ucs_table_cell_appendf() and the formatted one-shot
- * ucs_table_row_add_cell_fmt(). */
-static void ucs_table_cell_check_content(const ucs_table_cell_t *cell)
-{
-    const char *cstr = ucs_string_buffer_cstr(&cell->text);
-
-    ucs_assertv(strchr(cstr, '\n') == NULL,
-                "table cell content must not contain '\\n': '%s'", cstr);
-    ucs_assertv(strchr(cstr, '\t') == NULL,
-                "table cell content must not contain '\\t': '%s'", cstr);
-}
-
-
-void ucs_table_cell_appendf(ucs_table_cell_t *cell, const char *fmt, ...)
-{
-    va_list ap;
-
-    va_start(ap, fmt);
-    ucs_string_buffer_vappendf(&cell->text, fmt, ap);
-    va_end(ap);
-
-    ucs_table_cell_check_content(cell);
-}
-
-
 void ucs_table_row_add_cell_fmt(ucs_table_row_t *row, unsigned col_span,
                                 ucs_table_align_t align, const char *fmt, ...)
 {
     ucs_table_cell_t *cell = ucs_table_row_add_cell(row, col_span, align);
+    const char *cstr;
     va_list ap;
 
     va_start(ap, fmt);
     ucs_string_buffer_vappendf(&cell->text, fmt, ap);
     va_end(ap);
 
-    ucs_table_cell_check_content(cell);
+    cstr = ucs_string_buffer_cstr(&cell->text);
+
+    ucs_assertv(strchr(cstr, '\n') == NULL,
+                "table cell content must not contain '\\n': '%s'", cstr);
 }
 
 
@@ -347,12 +324,26 @@ static unsigned ucs_table_cell_content_len(ucs_table_cell_t *cell)
  * Each column starts at table->min_widths[i] (or 0 when unset) so the
  * caller can lock in a lower bound for stream-row content the table
  * does not see during measurement. */
-static void ucs_table_compute_widths(const ucs_table_t *table, int *widths)
+/* Allocate and populate table->widths if it has not been computed
+ * already. Idempotent — repeated calls are a no-op. Widths live on the
+ * table from the first call until ucs_table_cleanup(). */
+static void ucs_table_compute_widths(ucs_table_t *table)
 {
     ucs_table_entry_t *entry;
     ucs_table_cell_t *cell;
     unsigned i, body_col, content_len;
     int existing;
+    int *widths;
+
+    if (table->widths != NULL) {
+        return;
+    }
+
+    widths = ucs_malloc(table->n_body_cols * sizeof(*widths),
+                        "ucs_table_widths");
+    if (widths == NULL) {
+        ucs_fatal("failed to allocate table widths");
+    }
 
     for (i = 0; i < table->n_body_cols; ++i) {
         widths[i] = (table->min_widths != NULL) ? table->min_widths[i] : 0;
@@ -408,24 +399,8 @@ static void ucs_table_compute_widths(const ucs_table_t *table, int *widths)
             widths[i] = max_width;
         }
     }
-}
 
-
-/* Allocate and populate table->widths if it has not been computed
- * already. Idempotent — repeated calls are a no-op. Widths live on the
- * table from the first call until ucs_table_cleanup(). */
-static void ucs_table_widths_ensure(ucs_table_t *table)
-{
-    if (table->widths != NULL) {
-        return;
-    }
-
-    table->widths = ucs_malloc(table->n_body_cols * sizeof(*table->widths),
-                               "ucs_table_widths");
-    if (table->widths == NULL) {
-        ucs_fatal("failed to allocate table widths");
-    }
-    ucs_table_compute_widths(table, table->widths);
+    table->widths = widths;
 }
 
 
@@ -544,7 +519,7 @@ void ucs_table_render(ucs_table_t *table, ucs_string_buffer_t *strb)
     const ucs_table_entry_t *entry;
     unsigned i;
 
-    ucs_table_widths_ensure(table);
+    ucs_table_compute_widths(table);
 
     ucs_table_render_separator(table, strb, 0);
 
