@@ -1,5 +1,5 @@
 /**
-* Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2001-2015. ALL RIGHTS RESERVED.
+* Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2001-2026. ALL RIGHTS RESERVED.
 * Copyright (C) Shanghai Zhaoxin Semiconductor Co., Ltd. 2020. ALL RIGHTS RESERVED.
 * Copyright (C) Tactical Computing Labs, LLC. 2022. ALL RIGHTS RESERVED.
 * Copyright (C) Advanced Micro Devices, Inc. 2024. ALL RIGHTS RESERVED.
@@ -72,10 +72,11 @@ static void print_sys_topo_add_header(ucs_table_t *table,
     ucs_sys_device_t sys_dev;
 
     row = ucs_table_add_row(table);
-    ucs_table_row_add_cell_right(row, 1, "%s", first_col_label);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%s",
+                               first_col_label);
     for (sys_dev = 0; sys_dev < num_devices; ++sys_dev) {
-        ucs_table_row_add_cell_right(row, 1, "%s",
-                                     ucs_topo_sys_device_get_name(sys_dev));
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%s",
+                                   ucs_topo_sys_device_get_name(sys_dev));
     }
     ucs_table_add_separator(table);
 }
@@ -102,25 +103,28 @@ static void print_sys_topo_distances(unsigned num_devices)
         }
 
         row = ucs_table_add_row(&table);
-        ucs_table_row_add_cell_right(row, 1, "%s",
-                                     ucs_topo_sys_device_get_name(sys_dev1));
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%s",
+                                   ucs_topo_sys_device_get_name(sys_dev1));
 
         for (sys_dev2 = 0; sys_dev2 < num_devices; ++sys_dev2) {
             if (sys_dev1 == sys_dev2) {
                 /* Do not print distance of device to itself */
-                ucs_table_row_add_cell_right(row, 1, "%s", "-");
+                ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%s",
+                                           "-");
                 continue;
             }
 
             status = ucs_topo_get_distance(sys_dev1, sys_dev2, &distance);
             if (status != UCS_OK) {
-                ucs_table_row_add_cell_right(row, 1, "<%s>",
-                                             ucs_status_string(status));
+                ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT,
+                                           "<%s>", ucs_status_string(status));
             } else if (distance.bandwidth > UCS_PBYTE) {
-                ucs_table_row_add_cell_right(row, 1, "%s", "inf");
+                ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%s",
+                                           "inf");
             } else {
-                ucs_table_row_add_cell_right(row, 1, "%.1f",
-                                             distance.bandwidth / UCS_MBYTE);
+                ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT,
+                                           "%.1f",
+                                           distance.bandwidth / UCS_MBYTE);
             }
         }
     }
@@ -145,11 +149,11 @@ static void print_sys_topo_memory_latency(unsigned num_devices)
     print_sys_topo_add_header(&table, "device", num_devices);
 
     row = ucs_table_add_row(&table);
-    ucs_table_row_add_cell_right(row, 1, "%s", "nsec");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%s", "nsec");
     for (sys_dev = 0; sys_dev < num_devices; ++sys_dev) {
         ucs_topo_get_memory_distance(sys_dev, &distance);
-        ucs_table_row_add_cell_right(row, 1, "%.1f",
-                                     distance.latency * UCS_NSEC_PER_SEC);
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%.1f",
+                                   distance.latency * UCS_NSEC_PER_SEC);
     }
 
     ucs_table_print(&table);

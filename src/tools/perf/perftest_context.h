@@ -1,5 +1,5 @@
 /**
-* Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2024. ALL RIGHTS RESERVED.
+* Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2024-2026. ALL RIGHTS RESERVED.
 *
 * See file LICENSE for terms.
 */
@@ -9,6 +9,7 @@
 
 #include "api/libperf.h"
 #include "lib/libperf_int.h"
+#include <ucs/debug/table.h>
 #include <ucs/sys/string.h>
 
 
@@ -58,6 +59,22 @@ struct perftest_context {
     const char                   *mad_port;
 
     sock_rte_group_t             sock_rte_group;
+
+    /* Results table for the boxed (non-CSV) output. Streamed rows are
+     * one per OMP thread because progress callbacks fire concurrently
+     * from multiple threads in MT mode. results_stream_rows == NULL is
+     * the "table closed" sentinel. */
+    ucs_table_t                  results_table;
+    ucs_table_row_t              **results_stream_rows;
+    unsigned                     n_stream_rows;
+
+    /* Precomputed in run_test from a pre-walk of all batch files: the
+     * maximum length of any joined test_name string. In FINAL mode
+     * it's the results_table col 0 minimum so the prefix cell carrying
+     * the joined test name never overflows. In !FINAL mode col 0 stays
+     * at its default width and the col_span=9 preamble row auto-fits
+     * the existing total width. 0 when there are no batch files. */
+    size_t                       max_test_name_width;
 };
 
 

@@ -10,6 +10,10 @@ extern "C" {
 #include <ucs/debug/table.h>
 }
 
+#include <cstdio>
+#include <fcntl.h>
+#include <unistd.h>
+
 
 class test_table : public ucs::test {
 protected:
@@ -44,6 +48,39 @@ protected:
     private:
         ucs_table_t m_table;
     };
+
+    /* Capture stdout while running the given callable. Used to test the
+     * streaming print_row / print_separator functions, which write
+     * directly to stdout. */
+    template<typename F> static std::string capture_stdout(F &&fn)
+    {
+        FILE *tmp = tmpfile();
+        EXPECT_TRUE(tmp != NULL);
+        if (tmp == NULL) {
+            return std::string();
+        }
+
+        fflush(stdout);
+        const int saved_fd = dup(fileno(stdout));
+        EXPECT_GE(saved_fd, 0);
+        EXPECT_GE(dup2(fileno(tmp), fileno(stdout)), 0);
+
+        fn();
+
+        fflush(stdout);
+        EXPECT_GE(dup2(saved_fd, fileno(stdout)), 0);
+        close(saved_fd);
+
+        rewind(tmp);
+        std::string out;
+        char buf[256];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) {
+            out.append(buf, n);
+        }
+        fclose(tmp);
+        return out;
+    }
 };
 
 
@@ -60,7 +97,7 @@ UCS_TEST_F(test_table, empty_table_renders_top_and_bottom_frames) {
 UCS_TEST_F(test_table, single_cell_row_left_aligned) {
     table_t table(1);
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "abc");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "abc");
 
     EXPECT_EQ("+-----+\n"
               "| abc |\n"
@@ -74,12 +111,14 @@ UCS_TEST_F(test_table, multi_row_uses_per_column_max_width) {
     table_t table(2);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "short");
-    ucs_table_row_add_cell_left(row, 1, "%s", "even longer cell");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "short");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "even longer cell");
 
     row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "a much wider value");
-    ucs_table_row_add_cell_left(row, 1, "%s", "x");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "a much wider value");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
 
     EXPECT_EQ("+--------------------+------------------+\n"
               "| short              | even longer cell |\n"
@@ -95,7 +134,8 @@ UCS_TEST_F(test_table, right_aligned_cell) {
     table_t table(1);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_right(row, 1, "%s", "right-anchored");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%s",
+                               "right-anchored");
 
     EXPECT_EQ("+----------------+\n"
               "| right-anchored |\n"
@@ -109,10 +149,11 @@ UCS_TEST_F(test_table, right_anchor_pads_against_wider_left_row) {
     table_t table(1);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "long left value");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "long left value");
 
     row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_right(row, 1, "%s", "R");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%s", "R");
 
     EXPECT_EQ("+-----------------+\n"
               "| long left value |\n"
@@ -122,27 +163,28 @@ UCS_TEST_F(test_table, right_anchor_pads_against_wider_left_row) {
 }
 
 
-/* Group C: split cells (cell_appendf_left + cell_appendf_right on the same
- * cell) */
+/* Group C: LEFT_RIGHT split cells (single text buffer with embedded '\t'
+ * separating the left- and right-anchored portions) */
 
 UCS_TEST_F(test_table, split_cell_fills_gap_with_spaces) {
     /* Two body columns with one row that pins the body-col-0 width via
-     * 'a much wider value' (18 chars). The split cell has 'count' on the
-     * left and 'range' on the right; the gap between them is spaces. */
+     * 'a much wider value' (18 chars). The LEFT_RIGHT cell has 'count'
+     * on the left and 'range' on the right; the gap between them is
+     * spaces. */
     table_t table(2);
 
-    auto *row  = ucs_table_add_row(table.get());
-    auto *cell = ucs_table_row_add_cell(row, 1);
-    ucs_table_cell_appendf_left(cell, "%s", "count");
-    ucs_table_cell_appendf_right(cell, "%s", "range");
-    ucs_table_row_add_cell_left(row, 1, "%s", "filler");
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT_RIGHT, "%s\t%s",
+                               "count", "range");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "filler");
 
     row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "a much wider value");
-    ucs_table_row_add_cell_left(row, 1, "%s", "filler2");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "a much wider value");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "filler2");
 
-    /* Body col 0 width = 18, the split cell rendered there has L=5+R=5
-     * with (18-5-5)=8 spaces between. */
+    /* Body col 0 width = 18 (driven by 'a much wider value'); the
+     * LEFT_RIGHT cell has L=5 + R=5 with (18-5-5)=8 spaces between. */
     EXPECT_EQ("+--------------------+---------+\n"
               "| count        range | filler  |\n"
               "| a much wider value | filler2 |\n"
@@ -150,19 +192,43 @@ UCS_TEST_F(test_table, split_cell_fills_gap_with_spaces) {
               table.render());
 }
 
-UCS_TEST_F(test_table, split_cell_left_only_renders_as_left_aligned) {
-    /* When only set_left is called, the cell still has both buffers
-     * available but the right side is empty: the renderer falls back to
-     * the left-only branch. */
+UCS_TEST_F(test_table, left_right_widest_cell_keeps_one_space_gap) {
+    /* The LEFT_RIGHT cell is the widest content in its column. The
+     * uniform width formula counts the embedded '\t' as 1 char, so
+     * the column is 5 + 1 + 5 = 11 wide and the gap between "count"
+     * and "range" is exactly 1 space. This locks in the minimum-gap
+     * invariant: a LEFT_RIGHT cell always has at least 1 space of
+     * separation between its halves, even when no other row pins the
+     * column wider. */
+    table_t table(1);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT_RIGHT, "%s\t%s",
+                               "count", "range");
+
+    EXPECT_EQ("+-------------+\n"
+              "| count range |\n"
+              "+-------------+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table, left_right_incremental_appends_concatenate_around_tab) {
+    /* LEFT_RIGHT cells can be built incrementally: add an empty cell
+     * with the bare ucs_table_row_add_cell handle form, then append
+     * to the left half, the '\t' separator, and the right half.
+     * The render result is identical to a one-shot
+     * ucs_table_row_add_cell_fmt(row, ..., "<left>\t<right>"). */
     table_t table(1);
 
     auto *row  = ucs_table_add_row(table.get());
-    auto *cell = ucs_table_row_add_cell(row, 1);
-    ucs_table_cell_appendf_left(cell, "%s", "L only");
+    auto *cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT_RIGHT);
+    ucs_table_cell_appendf(cell, "%s", "count");
+    ucs_table_cell_appendf(cell, "\t");
+    ucs_table_cell_appendf(cell, "%s", "range");
 
-    EXPECT_EQ("+--------+\n"
-              "| L only |\n"
-              "+--------+\n",
+    EXPECT_EQ("+-------------+\n"
+              "| count range |\n"
+              "+-------------+\n",
               table.render());
 }
 
@@ -172,18 +238,20 @@ UCS_TEST_F(test_table, split_cell_left_only_renders_as_left_aligned) {
 UCS_TEST_F(test_table,
            separator_with_empty_leading_cell_below_uses_carry_over) {
     /* Row above has both cells set. Separator follows. Row below leaves
-     * the leading cell empty. Expected: leftmost separator segment is a
-     * blank "|     " (carry-over), the rest is a dashed "+-----" segment. */
+     * the leading cell empty AND flags it merge_with_above. Expected:
+     * leftmost separator segment is a blank "|     " (carry-over), the
+     * rest is a dashed "+-----" segment. */
     table_t table(2);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "type");
-    ucs_table_row_add_cell_left(row, 1, "%s", "data1");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "type");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "data1");
     ucs_table_add_separator(table.get());
 
     row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "");
-    ucs_table_row_add_cell_left(row, 1, "%s", "data2");
+    ucs_table_cell_set_merge_with_above(
+            ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT));
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "data2");
 
     EXPECT_EQ("+------+-------+\n"
               "| type | data1 |\n"
@@ -199,13 +267,13 @@ UCS_TEST_F(test_table, separator_without_empty_leading_cells_uses_plus_corner) {
     table_t table(2);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "a");
-    ucs_table_row_add_cell_left(row, 1, "%s", "b");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b");
     ucs_table_add_separator(table.get());
 
     row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "c");
-    ucs_table_row_add_cell_left(row, 1, "%s", "d");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "c");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "d");
 
     EXPECT_EQ("+---+---+\n"
               "| a | b |\n"
@@ -225,13 +293,131 @@ UCS_TEST_F(test_table, separator_at_table_edges_is_always_plain_frame) {
     table_t table(2);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "x");
-    ucs_table_row_add_cell_left(row, 1, "%s", "");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT); /* empty */
     ucs_table_add_separator(table.get());
 
     EXPECT_EQ("+---+--+\n"
               "| x |  |\n"
               "+---+--+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table, separator_merge_with_above_flag_triggers_carry_over) {
+    /* Positive test: a single LEADING cell flagged merge_with_above
+     * causes the separator above to render its leftmost segment as a
+     * blank "|     " carry-over, leaving the remaining segments
+     * dashed. The leftmost corner shifts from '+' to '|' to signal
+     * the carry-over. */
+    table_t table(2);
+    const int min_widths[2] = {3, 3};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "y");
+    ucs_table_add_separator(table.get());
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_cell_set_merge_with_above(
+            ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT));
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "z");
+
+    EXPECT_EQ("+-----+-----+\n"
+              "| x   | y   |\n"
+              "|     +-----+\n"
+              "|     | z   |\n"
+              "+-----+-----+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table,
+           separator_empty_leading_cell_without_flag_does_not_carry_over) {
+    /* Regression: with the auto-detect-empty heuristic gone, a row
+     * whose leading cell is empty but UNFLAGGED must produce a fully
+     * dashed separator (no carry-over). This catches accidental
+     * reintroduction of the empty-cell heuristic. */
+    table_t table(2);
+    const int min_widths[2] = {3, 3};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "y");
+    ucs_table_add_separator(table.get());
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT); /* empty, no flag */
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "z");
+
+    EXPECT_EQ("+-----+-----+\n"
+              "| x   | y   |\n"
+              "+-----+-----+\n"
+              "|     | z   |\n"
+              "+-----+-----+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table,
+           separator_merge_with_above_stops_at_first_unflagged_cell) {
+    /* Ordering: the walk over leading flagged cells stops at the
+     * first unflagged cell, even if a later cell carries the flag.
+     * Here col 0 is flagged, col 1 is not, col 2 is flagged: only
+     * col 0 contributes to the carry-over; col 2's flag is ignored
+     * because it isn't part of the contiguous leading run. */
+    table_t table(3);
+    const int min_widths[3] = {3, 3, 3};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "c");
+    ucs_table_add_separator(table.get());
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_cell_set_merge_with_above(
+            ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT));
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT); /* unflagged */
+    ucs_table_cell_set_merge_with_above(
+            /* ignored: not leading */
+            ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT));
+
+    EXPECT_EQ("+-----+-----+-----+\n"
+              "| a   | b   | c   |\n"
+              "|     +-----+-----+\n"
+              "|     |     |     |\n"
+              "+-----+-----+-----+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table,
+           separator_merge_with_above_with_col_span_covers_full_span) {
+    /* A leading flagged cell with col_span=2 contributes its full
+     * span (cols 0-1) to the carry-over. The separator above renders
+     * blank across both columns, with a '|' leftmost corner, a
+     * blank-to-blank corner '+' between the merged segments, and
+     * dashed segments for the rest. Mirrors the canonical use case
+     * of a leading "category" cell that spans multiple body columns. */
+    table_t table(3);
+    const int min_widths[3] = {3, 3, 3};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_LEFT, "%s", "ab");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
+    ucs_table_add_separator(table.get());
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_cell_set_merge_with_above(
+            ucs_table_row_add_cell(row, 2, UCS_TABLE_ALIGN_LEFT));
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "y");
+
+    EXPECT_EQ("+-----+-----+-----+\n"
+              "| ab        | x   |\n"
+              "|     +     +-----+\n"
+              "|           | y   |\n"
+              "+-----+-----+-----+\n",
               table.render());
 }
 
@@ -245,11 +431,11 @@ UCS_TEST_F(test_table, col_span_merged_cell_short_content_inherits_widths) {
     table_t table(2);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 2, "%s", "hdr");
+    ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_LEFT, "%s", "hdr");
 
     row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "abcdef");
-    ucs_table_row_add_cell_left(row, 1, "%s", "ghijklm");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "abcdef");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "ghijklm");
 
     /* Body cols are 6 and 7 wide; the merged cell sits over both,
      * total pixel width 6 + 7 + 3 = 16. */
@@ -267,11 +453,12 @@ UCS_TEST_F(test_table, col_span_grows_rightmost_body_column_when_needed) {
     table_t table(2);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 2, "%s", "this header is too wide");
+    ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "this header is too wide");
 
     row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "ab");
-    ucs_table_row_add_cell_left(row, 1, "%s", "cd");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "ab");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "cd");
 
     /* base widths {2, 2}; merged pixel width = 2 + 2 + 3 = 7; content =
      * 23. deficit 23 - 7 = 16 added to widths[1]. New widths {2, 18}. */
@@ -283,49 +470,17 @@ UCS_TEST_F(test_table, col_span_grows_rightmost_body_column_when_needed) {
 }
 
 
-/* Group F: row_add_cell_left/_right equivalence with the handle setters */
+/* Group F: incremental cell construction */
 
-UCS_TEST_F(test_table, row_add_cell_left_equals_add_cell_plus_appendf_left) {
-    table_t table_a(2);
-    auto *row_a = ucs_table_add_row(table_a.get());
-    ucs_table_row_add_cell_left(row_a, 1, "%s", "hello");
-    ucs_table_row_add_cell_left(row_a, 1, "%s", "world");
-
-    table_t table_b(2);
-    auto *row_b   = ucs_table_add_row(table_b.get());
-    auto *cell_b1 = ucs_table_row_add_cell(row_b, 1);
-    ucs_table_cell_appendf_left(cell_b1, "%s", "hello");
-    auto *cell_b2 = ucs_table_row_add_cell(row_b, 1);
-    ucs_table_cell_appendf_left(cell_b2, "%s", "world");
-
-    EXPECT_EQ(table_a.render(), table_b.render());
-}
-
-UCS_TEST_F(test_table, row_add_cell_right_equals_add_cell_plus_appendf_right) {
-    table_t table_a(2);
-    auto *row_a = ucs_table_add_row(table_a.get());
-    ucs_table_row_add_cell_right(row_a, 1, "%s", "hello");
-    ucs_table_row_add_cell_right(row_a, 1, "%s", "world");
-
-    table_t table_b(2);
-    auto *row_b   = ucs_table_add_row(table_b.get());
-    auto *cell_b1 = ucs_table_row_add_cell(row_b, 1);
-    ucs_table_cell_appendf_right(cell_b1, "%s", "hello");
-    auto *cell_b2 = ucs_table_row_add_cell(row_b, 1);
-    ucs_table_cell_appendf_right(cell_b2, "%s", "world");
-
-    EXPECT_EQ(table_a.render(), table_b.render());
-}
-
-UCS_TEST_F(test_table, cell_appendf_left_concatenates_multiple_calls) {
-    /* The plain rename intent: cell_appendf_* supports calling more than
-     * once to build the cell content incrementally. */
+UCS_TEST_F(test_table, cell_appendf_concatenates_multiple_calls) {
+    /* cell_appendf supports calling more than once to build the cell
+     * content incrementally. */
     table_t table(1);
 
     auto *row  = ucs_table_add_row(table.get());
-    auto *cell = ucs_table_row_add_cell(row, 1);
-    ucs_table_cell_appendf_left(cell, "%s", "hello");
-    ucs_table_cell_appendf_left(cell, "-%s", "world");
+    auto *cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+    ucs_table_cell_appendf(cell, "%s", "hello");
+    ucs_table_cell_appendf(cell, "-%s", "world");
 
     EXPECT_EQ("+-------------+\n"
               "| hello-world |\n"
@@ -336,24 +491,26 @@ UCS_TEST_F(test_table, cell_appendf_left_concatenates_multiple_calls) {
 
 /* Group G: printf formatting goes through unchanged */
 
-UCS_TEST_F(test_table, printf_formatting_supported_by_all_setters) {
-    /* Exercises printf formatting through every setter variant. A wider
-     * row pins body col 0 to 12, which leaves a visible gap between the
-     * split cell's left and right halves. */
+UCS_TEST_F(test_table, printf_formatting_supported_by_all_alignments) {
+    /* Exercises printf formatting through every alignment branch. A
+     * wider row pins body col 0 to 12, which leaves a visible gap
+     * between the LEFT_RIGHT cell's left and right halves. */
     table_t table(2);
 
     auto *row  = ucs_table_add_row(table.get());
-    auto *cell = ucs_table_row_add_cell(row, 1);
-    ucs_table_cell_appendf_left(cell, "%d", 42);
-    ucs_table_cell_appendf_right(cell, "%s..%s", "lo", "hi");
-    ucs_table_row_add_cell_left(row, 1, "%s=%u", "k", 7u);
+    auto *cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT_RIGHT);
+    ucs_table_cell_appendf(cell, "%d", 42);
+    ucs_table_cell_appendf(cell, "\t");
+    ucs_table_cell_appendf(cell, "%s..%s", "lo", "hi");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s=%u", "k", 7u);
 
     row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "padding row.");
-    ucs_table_row_add_cell_left(row, 1, "%s", "");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "padding row.");
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT); /* empty */
 
-    /* Body col 0 width = 12, the split cell renders as L=2 + 4 spaces +
-     * R=6. */
+    /* Body col 0 width = 12 (driven by 'padding row.'). The LEFT_RIGHT
+     * cell renders as L=2 + 4 spaces + R=6. */
     EXPECT_EQ("+--------------+-----+\n"
               "| 42    lo..hi | k=7 |\n"
               "| padding row. |     |\n"
@@ -367,43 +524,50 @@ UCS_TEST_F(test_table, printf_formatting_supported_by_all_setters) {
 UCS_TEST_F(test_table, integration_proto_debug_like_layout) {
     /* Three body columns. Header is two cells (right-anchored ep_cfg in
      * col 0, left-anchored sel_param spanning cols 1+2). Body rows have
-     * three cells, the first being a split cell with optional left
-     * count and right range. */
+     * three cells, the first being a RIGHT-anchored cell when there is
+     * no count, and a LEFT_RIGHT cell when both a count and a range are
+     * present (mirrors proto_debug.c). */
     table_t table(3);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_right(row, 1, "%s", "cfg#1");
-    ucs_table_row_add_cell_left(row, 2, "%s", "op from host memory");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%s", "cfg#1");
+    ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "op from host memory");
     ucs_table_add_separator(table.get());
 
-    /* Body row 1: no count, range = 0..2038 */
-    row        = ucs_table_add_row(table.get());
-    auto *cell = ucs_table_row_add_cell(row, 1);
-    ucs_table_cell_appendf_right(cell, "%s", "0..2038");
-    ucs_table_row_add_cell_left(row, 1, "%s", "short");
-    ucs_table_row_add_cell_left(row, 1, "%s", "rc_mlx5");
+    /* Body row 1: no count, range only (RIGHT-aligned). */
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%s", "0..2038");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "short");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "rc_mlx5");
 
-    /* Body row 2: count 0, range = 2039..8184 */
-    row  = ucs_table_add_row(table.get());
-    cell = ucs_table_row_add_cell(row, 1);
-    ucs_table_cell_appendf_left(cell, "%u  ", 0u);
-    ucs_table_cell_appendf_right(cell, "%s", "2039..8184");
-    ucs_table_row_add_cell_left(row, 1, "%s", "zero-copy");
-    ucs_table_row_add_cell_left(row, 1, "%s", "rc_mlx5");
+    /* Body row 2: count 0, range = 2039..8184 (LEFT_RIGHT). The
+     * conditional-content shape from proto_debug.c uses the bare
+     * add_cell handle form with two appendfs. */
+    row        = ucs_table_add_row(table.get());
+    auto *cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT_RIGHT);
+    ucs_table_cell_appendf(cell, "%u  \t", 0u);
+    ucs_table_cell_appendf(cell, "%s", "2039..8184");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "zero-copy");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "rc_mlx5");
 
     const std::string out = table.render();
 
-    /* Body col 0 width is max("0..2038", "0  2039..8184") = 13.
-     * Body col 1 width is max("short", "zero-copy")     = 9.
-     * Body col 2 width is max("rc_mlx5", "rc_mlx5")     = 7.
-     * Header col 1 spans cols 1+2 (= 9+7+3 = 19); content "op from
-     * host memory" is 19 chars, exactly fits without expansion. */
-    EXPECT_EQ("+---------------+-----------+---------+\n"
-              "|         cfg#1 | op from host memory |\n"
-              "+---------------+-----------+---------+\n"
-              "|       0..2038 | short     | rc_mlx5 |\n"
-              "| 0  2039..8184 | zero-copy | rc_mlx5 |\n"
-              "+---------------+-----------+---------+\n",
+    /* Body col 0 width = max(len("0..2038"), len("0  \t2039..8184")) =
+     *                    max(7, 14) = 14 (the embedded '\t' in the
+     *                    LEFT_RIGHT cell counts as one char of width,
+     *                    so the column is 1 wider than the old design
+     *                    and the LEFT_RIGHT cell renders with one
+     *                    space of gap between "0  " and "2039..").
+     * Body col 1 width = max("short", "zero-copy") = 9.
+     * Body col 2 width = 7. Header col 1+2 spans 9+7+3=19, content
+     * "op from host memory" = 19 — exactly fits. */
+    EXPECT_EQ("+----------------+-----------+---------+\n"
+              "|          cfg#1 | op from host memory |\n"
+              "+----------------+-----------+---------+\n"
+              "|        0..2038 | short     | rc_mlx5 |\n"
+              "| 0   2039..8184 | zero-copy | rc_mlx5 |\n"
+              "+----------------+-----------+---------+\n",
               out);
 }
 
@@ -415,7 +579,7 @@ UCS_TEST_F(test_table, row_prefix_default_is_null_no_prefix) {
      * that never touched the prefix. */
     table_t table(1);
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "abc");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "abc");
 
     EXPECT_EQ("+-----+\n"
               "| abc |\n"
@@ -429,7 +593,7 @@ UCS_TEST_F(test_table, row_prefix_prepended_to_every_line) {
     table_t table(1);
     ucs_table_set_row_prefix(table.get(), "# ");
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "abc");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "abc");
 
     EXPECT_EQ("# +-----+\n"
               "# | abc |\n"
@@ -444,10 +608,10 @@ UCS_TEST_F(test_table, row_prefix_prepended_to_inner_separator) {
     ucs_table_set_row_prefix(table.get(), "# ");
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "a");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
     ucs_table_add_separator(table.get());
     row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "b");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b");
 
     EXPECT_EQ("# +---+\n"
               "# | a |\n"
@@ -463,7 +627,7 @@ UCS_TEST_F(test_table, row_prefix_empty_string_renders_unchanged) {
     table_t table(1);
     ucs_table_set_row_prefix(table.get(), "");
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "abc");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "abc");
 
     EXPECT_EQ("+-----+\n"
               "| abc |\n"
@@ -476,7 +640,7 @@ UCS_TEST_F(test_table, row_prefix_can_be_cleared_back_to_null) {
      * renders must drop the prefix on every line. */
     table_t table(1);
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "abc");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "abc");
 
     ucs_table_set_row_prefix(table.get(), "# ");
     EXPECT_EQ("# +-----+\n"
@@ -501,9 +665,9 @@ UCS_TEST_F(test_table, equal_widths_default_disabled_uses_per_column_widths) {
     table_t table(3);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "a");
-    ucs_table_row_add_cell_left(row, 1, "%s", "longer");
-    ucs_table_row_add_cell_left(row, 1, "%s", "xy");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "longer");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "xy");
 
     EXPECT_EQ("+---+--------+----+\n"
               "| a | longer | xy |\n"
@@ -519,9 +683,9 @@ UCS_TEST_F(test_table, equal_widths_normalizes_all_columns_to_max) {
     ucs_table_set_equal_widths(table.get(), 1);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "a");
-    ucs_table_row_add_cell_left(row, 1, "%s", "longer");
-    ucs_table_row_add_cell_left(row, 1, "%s", "xy");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "longer");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "xy");
 
     EXPECT_EQ("+--------+--------+--------+\n"
               "| a      | longer | xy     |\n"
@@ -538,15 +702,391 @@ UCS_TEST_F(test_table, equal_widths_with_col_span_propagates_post_expansion) {
     ucs_table_set_equal_widths(table.get(), 1);
 
     auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 2, "%s", "this header is too wide");
+    ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "this header is too wide");
 
     row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_left(row, 1, "%s", "ab");
-    ucs_table_row_add_cell_left(row, 1, "%s", "cd");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "ab");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "cd");
 
     EXPECT_EQ("+--------------------+--------------------+\n"
               "| this header is too wide                 |\n"
               "| ab                 | cd                 |\n"
               "+--------------------+--------------------+\n",
+              table.render());
+}
+
+
+/* Group K: set_min_col_widths */
+
+UCS_TEST_F(test_table, set_min_col_widths_widens_narrow_columns) {
+    /* min_widths {10, 10} forces each column to be at least 10 chars,
+     * even though the actual content is much shorter. */
+    table_t table(2);
+
+    const int min_widths[2] = {10, 10};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b");
+
+    EXPECT_EQ("+------------+------------+\n"
+              "| a          | b          |\n"
+              "+------------+------------+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table,
+           set_min_col_widths_does_not_shrink_columns_wider_than_min) {
+    /* When the row's content exceeds the minimum, the computed column
+     * width wins and the table grows past the minimum. */
+    table_t table(2);
+
+    const int min_widths[2] = {3, 3};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "abcdefghij");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "xy");
+
+    EXPECT_EQ("+------------+-----+\n"
+              "| abcdefghij | xy  |\n"
+              "+------------+-----+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table, set_min_col_widths_null_clears_minimums) {
+    /* Set a minimum, then clear it and verify the column shrinks
+     * back to the auto-computed width. */
+    table_t table(1);
+
+    const int min_widths[1] = {12};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_set_min_col_widths(table.get(), NULL);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
+
+    EXPECT_EQ("+---+\n"
+              "| x |\n"
+              "+---+\n",
+              table.render());
+}
+
+
+/* Group L: streaming API (stream_row / print_row / print_separator) */
+
+UCS_TEST_F(test_table,
+           streaming_print_plus_rows_plus_separator_matches_inline_render) {
+    /* Streaming flow: build a header with a couple of rows, render +
+     * print it, then stream two additional rows and close with a
+     * separator. The captured stdout must byte-match a fully-inline
+     * rendering of the same shape — note that ucs_table_print emits
+     * its own bottom frame after the header row, which doubles as the
+     * dividing separator between the header and the streamed data;
+     * the inline comparison must therefore include an explicit
+     * add_separator between the header and the data rows. */
+    table_t streamed(2);
+    auto *row = ucs_table_add_row(streamed.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h1");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h2");
+
+    /* Lock widths so the streamed cells have predictable widths. */
+    const int min_widths[2] = {4, 4};
+    ucs_table_set_min_col_widths(streamed.get(), min_widths);
+
+    const std::string streamed_out = capture_stdout([&]() {
+        ucs_table_print(streamed.get());
+
+        auto *stream = ucs_table_stream_row_create(streamed.get());
+        ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a1");
+        ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b1");
+        ucs_table_print_row(stream);
+
+        ucs_table_stream_row_reset(stream);
+        ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a2");
+        ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b2");
+        ucs_table_print_row(stream);
+
+        ucs_table_print_separator(streamed.get());
+        ucs_table_stream_row_destroy(stream);
+    });
+
+    /* Equivalent fully-inline table: header row, explicit separator
+     * (matches the streamed flow's bottom-frame-doubles-as-divider
+     * boundary), then the two data rows. */
+    table_t inline_table(2);
+    ucs_table_set_min_col_widths(inline_table.get(), min_widths);
+    row = ucs_table_add_row(inline_table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h1");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h2");
+    ucs_table_add_separator(inline_table.get());
+    row = ucs_table_add_row(inline_table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a1");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b1");
+    row = ucs_table_add_row(inline_table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a2");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b2");
+
+    EXPECT_EQ(inline_table.render(), streamed_out);
+}
+
+UCS_TEST_F(test_table, stream_row_reset_repopulate_uses_same_widths) {
+    /* A stream row reset between two prints produces a different
+     * rendered line, but the column widths (from the table) stay
+     * the same. */
+    table_t table(2);
+    const int min_widths[2] = {5, 5};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    /* Need a real row in the table so the header gets a meaningful width. */
+    auto *header = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h1");
+    ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h2");
+
+    const std::string out = capture_stdout([&]() {
+        ucs_table_print(table.get());
+
+        auto *stream = ucs_table_stream_row_create(table.get());
+        ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
+        ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_LEFT, "%s", "y");
+        ucs_table_print_row(stream);
+
+        ucs_table_stream_row_reset(stream);
+        ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                                   "xxxxx");
+        ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_LEFT, "%s", "y");
+        ucs_table_print_row(stream);
+
+        ucs_table_stream_row_destroy(stream);
+    });
+
+    /* Both streamed rows render at the locked 5-char widths. The
+     * bottom frame after the header row is emitted by ucs_table_print
+     * and serves as the visual divider before the streamed data. */
+    EXPECT_EQ("+-------+-------+\n"
+              "| h1    | h2    |\n"
+              "+-------+-------+\n"
+              "| x     | y     |\n"
+              "| xxxxx | y     |\n",
+              out);
+}
+
+UCS_TEST_F(test_table, render_row_omits_trailing_newline_for_extra_content) {
+    /* render_row writes "| ... |" without a trailing newline so the
+     * caller can splice extra content before the final '\n'. */
+    table_t table(2);
+    const int min_widths[2] = {3, 3};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    auto *header = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h");
+    ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_LEFT, "%s", "i");
+    ucs_table_print(table.get()); /* compute widths */
+
+    auto *stream = ucs_table_stream_row_create(table.get());
+    ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_LEFT, "%s", "v1");
+    ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_LEFT, "%s", "v2");
+
+    ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
+    ucs_table_render_row(stream, &strb);
+    /* No trailing newline. */
+    EXPECT_EQ(std::string("| v1  | v2  |"), ucs_string_buffer_cstr(&strb));
+
+    /* Caller can append more, then a newline. */
+    ucs_string_buffer_appendf(&strb, "  extra\n");
+    EXPECT_EQ(std::string("| v1  | v2  |  extra\n"),
+              ucs_string_buffer_cstr(&strb));
+    ucs_string_buffer_cleanup(&strb);
+
+    ucs_table_stream_row_destroy(stream);
+}
+
+UCS_TEST_F(test_table, stream_row_supports_all_alignments) {
+    /* Stream rows accept the same alignment selector as regular rows. */
+    table_t table(2);
+    const int min_widths[2] = {4, 4};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    auto *header = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_LEFT, "%s", "L");
+    ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_RIGHT, "%s", "R");
+    ucs_table_print(table.get());
+
+    auto *stream = ucs_table_stream_row_create(table.get());
+    /* LEFT_RIGHT split via embedded '\t'. */
+    ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_LEFT_RIGHT, "%s\t%s",
+                               "a", "b");
+    /* RIGHT-aligned single string. */
+    ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_RIGHT, "%s", "z");
+
+    ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
+    ucs_table_render_row(stream, &strb);
+    EXPECT_EQ(std::string("| a  b |    z |"), ucs_string_buffer_cstr(&strb));
+    ucs_string_buffer_cleanup(&strb);
+
+    ucs_table_stream_row_destroy(stream);
+}
+
+UCS_TEST_F(test_table,
+           streamed_row_with_constant_printf_widths_lays_out_flush) {
+    /* Caller-supplied min_widths used with matching constant %* printf
+     * widths produces cells that fill the column exactly. */
+    table_t table(3);
+    const int min_widths[3] = {5, 7, 4};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    auto *header = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_LEFT, "%s", "A");
+    ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_LEFT, "%s", "B");
+    ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_LEFT, "%s", "C");
+
+    const std::string out = capture_stdout([&]() {
+        ucs_table_print(table.get());
+
+        auto *stream = ucs_table_stream_row_create(table.get());
+        ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_RIGHT, "%*.0f",
+                                   min_widths[0], 12.0);
+        ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_RIGHT, "%*.2f",
+                                   min_widths[1], 1.5);
+        ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_RIGHT, "%*d",
+                                   min_widths[2], 7);
+        ucs_table_print_row(stream);
+        ucs_table_stream_row_destroy(stream);
+    });
+
+    /* "12" right-padded to 5 chars; "1.50" right-padded to 7;
+     * "   7" right-padded to 4. The data row aligns flush with the
+     * header cell borders. The bottom frame after the header row is
+     * emitted by ucs_table_print. */
+    EXPECT_EQ("+-------+---------+------+\n"
+              "| A     | B       | C    |\n"
+              "+-------+---------+------+\n"
+              "|    12 |    1.50 |    7 |\n",
+              out);
+}
+
+
+/* Group N: centered cells */
+
+UCS_TEST_F(test_table, centered_cell_pads_evenly_around_text) {
+    /* Single body column. Wider second row pins col 0 to 11. CENTER
+     * 'abc' in width 11: pad=8, left_pad=4, right_pad=4. */
+    table_t table(1);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%s", "abc");
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "wider value");
+
+    EXPECT_EQ("+-------------+\n"
+              "|     abc     |\n"
+              "| wider value |\n"
+              "+-------------+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table,
+           centered_cell_with_col_span_centers_over_merged_columns) {
+    /* Merged CENTER cell spans both body cols. The body row pins each
+     * col to width 4, so the merged pixel width is 4+4+3=11. CENTER
+     * 'hi' in 11: pad=9, left_pad=4, right_pad=5 (right gets the odd
+     * extra). */
+    table_t table(2);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_CENTER, "%s", "hi");
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "abcd");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "efgh");
+
+    EXPECT_EQ("+------+------+\n"
+              "|     hi      |\n"
+              "| abcd | efgh |\n"
+              "+------+------+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table, centered_cell_with_odd_padding_biases_right_pad) {
+    /* When pad is odd, the right side gets the extra space (left_pad =
+     * pad/2, right_pad = pad - left_pad). With width 8 and content 3,
+     * pad=5 -> left_pad=2, right_pad=3. */
+    table_t table(1);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%s", "abc");
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "12345678");
+
+    EXPECT_EQ("+----------+\n"
+              "|   abc    |\n"
+              "| 12345678 |\n"
+              "+----------+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table, centered_cell_with_equal_widths_uses_normalized_width) {
+    /* Per-column widths from the row are {1, 6}. equal_widths
+     * normalizes both to 6. CENTER 'x' in width 6: pad=5,
+     * left_pad=2, right_pad=3. */
+    table_t table(2);
+    ucs_table_set_equal_widths(table.get(), 1);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%s", "x");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "longer");
+
+    EXPECT_EQ("+--------+--------+\n"
+              "|   x    | longer |\n"
+              "+--------+--------+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table, centered_cell_with_min_col_widths_respects_minimum) {
+    /* min_widths {7} forces col 0 to 7 even though the content is only
+     * 2 chars. CENTER 'ab' in 7: pad=5, left_pad=2, right_pad=3. */
+    table_t table(1);
+
+    const int min_widths[1] = {7};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%s", "ab");
+
+    EXPECT_EQ("+---------+\n"
+              "|   ab    |\n"
+              "+---------+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table, centered_cell_followed_by_empty_carryover_keeps_corner) {
+    /* CENTER cell with non-empty content above; the leading cell on
+     * the row below is flagged merge_with_above (and is empty). The
+     * separator above the flagged cell renders as a blank carry-over
+     * segment, while the second column renders dashed. CENTER vs LEFT
+     * alignment is orthogonal to the flag-driven carry-over. */
+    table_t table(2);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%s", "ctr");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "data1");
+    ucs_table_add_separator(table.get());
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_cell_set_merge_with_above(
+            ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT));
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "data2");
+
+    EXPECT_EQ("+-----+-------+\n"
+              "| ctr | data1 |\n"
+              "|     +-------+\n"
+              "|     | data2 |\n"
+              "+-----+-------+\n",
               table.render());
 }

@@ -1,5 +1,6 @@
-/*
- * Copyright (C) 2022, NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
+/**
+ * Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2022-2026. ALL RIGHTS RESERVED.
+ *
  * See file LICENSE for terms.
  */
 
@@ -186,7 +187,7 @@ ucp_proto_select_elem_info(ucp_worker_h worker,
     ucp_proto_query_attr_t proto_attr;
     ucs_table_t table;
     ucs_table_row_t *row;
-    ucs_table_cell_t *range_cell;
+    ucs_table_cell_t *cell;
     size_t range_start, range_end;
     char range_str[32];
     int proto_valid;
@@ -208,10 +209,10 @@ ucp_proto_select_elem_info(ucp_worker_h worker,
     ucs_table_init(&table, 3);
 
     row = ucs_table_add_row(&table);
-    ucs_table_row_add_cell_left(row, 1, "%s",
-                                ucs_string_buffer_cstr(&ep_cfg_strb));
-    ucs_table_row_add_cell_left(row, 2, "%s",
-                                ucs_string_buffer_cstr(&sel_param_strb));
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               ucs_string_buffer_cstr(&ep_cfg_strb));
+    ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_LEFT, "%s",
+                               ucs_string_buffer_cstr(&sel_param_strb));
     ucs_table_add_separator(&table);
 
     /* One body row per valid protocol range. */
@@ -229,19 +230,24 @@ ucp_proto_select_elem_info(ucp_worker_h worker,
         row = ucs_table_add_row(&table);
 
         /* First body cell holds an optional selection counter (left-
-         * anchored) and the range string (right-anchored). */
+         * anchored) and the range string (right-anchored). The cell
+         * uses LEFT_RIGHT alignment when both halves are present and
+         * RIGHT alignment when only the range string is shown. */
         ucs_memunits_range_str(range_start, range_end, range_str,
                                sizeof(range_str));
-        range_cell = ucs_table_row_add_cell_right(row, 1, "%s", range_str);
+        cell = ucs_table_row_add_cell(row, 1,
+                                      show_used ? UCS_TABLE_ALIGN_LEFT_RIGHT :
+                                                  UCS_TABLE_ALIGN_RIGHT);
         if (show_used) {
-            ucs_table_cell_appendf_left(range_cell, "%u  ",
-                                        proto_attr.selections);
+            ucs_table_cell_appendf(cell, "%u  \t", proto_attr.selections);
         }
+        ucs_table_cell_appendf(cell, "%s", range_str);
 
-        ucs_table_row_add_cell_left(row, 1, "%s%s",
-                                    proto_attr.is_estimation ? "(?) " : "",
-                                    proto_attr.desc);
-        ucs_table_row_add_cell_left(row, 1, "%s", proto_attr.config);
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s%s",
+                                   proto_attr.is_estimation ? "(?) " : "",
+                                   proto_attr.desc);
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                                   proto_attr.config);
     } while (range_end != SIZE_MAX);
 
     ucs_table_render(&table, strb);

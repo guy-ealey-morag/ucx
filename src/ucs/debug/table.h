@@ -30,26 +30,71 @@ BEGIN_C_DECLS
  *     cells per row may be fewer if some cells use col_span > 1 to merge
  *     adjacent body columns.
  *
- *   - Cell: a value in one row. Has two independently-anchored "sides":
- *     a left-anchored part and a right-anchored part. Either or both may
- *     be empty.
+ *   - Cell: a value in one row. Has an explicit alignment selected at
+ *     add-cell time:
  *
- *       - Left only:  "| content                 |"
- *       - Right only: "|                 content |"
- *       - Both:       "| left            content |"
+ *       - LEFT:       "| content                 |"
+ *       - RIGHT:      "|                 content |"
+ *       - CENTER:     "|         content         |"
+ *       - LEFT_RIGHT: "| left            content |"
+ *
+ *     LEFT_RIGHT cells store a single string that contains exactly one
+ *     '\t' separating the left- and right-anchored portions; the '\t'
+ *     itself counts as 1 character of cell width, guaranteeing at least
+ *     a single space of gap between the two halves at render time.
  *
  *   - Separator: a horizontal "+---+---+" rule between rows. Frame
  *     separators at the top and bottom of the table are inserted
  *     automatically by render().
  *
- *   - Carry-over: when the row immediately following a separator has one
- *     or more empty leading cells, those positions render as blank
+ *   - Carry-over: opt-in per cell via ucs_table_cell_set_merge_with_above.
+ *     When the row immediately following a separator has one or more
+ *     LEADING cells flagged this way, those positions render as blank
  *     "|     |" segments rather than dashes, and the leftmost corner is
  *     '|' instead of '+'. This is used to visually continue a column from
- *     the row above the separator into the row below.
+ *     the row above the separator into the row below. The flag has no
+ *     effect on the cell's own row rendering, and is ignored when set on
+ *     non-leading cells.
  *
  * All cell content is owned by the table; ucs_table_cleanup() releases
  * everything.
+ *
+ *
+ *   Lifecycle:
+ *
+ *   A table starts in a "building" state where rows, separators, and
+ *   cells can be added. Calling ucs_table_render() or ucs_table_print()
+ *   computes the per-column widths and emits the table; the widths are
+ *   then kept alive on the table until ucs_table_cleanup() runs. While
+ *   widths are alive, the table accepts streaming rows and additional
+ *   separators printed directly to stdout (see "Streamed rows" below),
+ *   but it rejects new builder calls (add_row / add_separator / cell
+ *   appends on regular rows / set_min_col_widths) via assertion. This
+ *   prevents silent column overflow that would otherwise happen if rows
+ *   were added after the widths were computed.
+ *
+ *   Existing one-shot callers (init + add rows + render + cleanup) see
+ *   no behavior change: their widths are freed by cleanup as before.
+ *
+ *
+ *   Streamed rows:
+ *
+ *   After ucs_table_render() (or ucs_table_print()), the caller can
+ *   open ucs_table_stream_row_create() handles and use the regular
+ *   ucs_table_row_add_cell() / ucs_table_cell_appendf() API to
+ *   populate them, then call ucs_table_print_row() to emit each row
+ *   using the table's already-computed widths. Streamed rows are not stored in the table's
+ *   entries; they are owned by the caller and must be released with
+ *   ucs_table_stream_row_destroy(). To close a streamed region, the
+ *   caller calls ucs_table_print_separator() once. This pattern is
+ *   used for "live" progress output where rows arrive incrementally
+ *   and must align to a header rendered once at the top.
+ *
+ *   Streamed rows alone cannot guarantee they fit in their columns
+ *   (the table did not see their content when computing widths). The
+ *   caller should call ucs_table_set_min_col_widths() before render
+ *   to lock in column widths that match the printf widths it will use
+ *   to format streamed-row cells.
  */
 
 
@@ -58,14 +103,45 @@ typedef struct ucs_table_cell ucs_table_cell_t;
 
 
 /*
- * Internal type. Each cell holds a left-anchored and a right-anchored
- * string buffer. Both buffers are managed by the table API; callers
- * must not access them directly.
+ * Cell alignment selector. Set at ucs_table_row_add_cell() time and
+ * fixed for the lifetime of the cell.
+ *
+ * - LEFT:       single string, padded on the right.
+ * - RIGHT:      single string, padded on the left.
+ * - CENTER:     single string, padded equally on both sides (right side
+ *               gets the extra space when padding is odd).
+ * - LEFT_RIGHT: caller embeds exactly one '\t' in the cell content;
+ *               text before the '\t' is left-anchored, text after is
+ *               right-anchored, and the gap between them is filled with
+ *               spaces.
+ */
+typedef enum {
+    UCS_TABLE_ALIGN_LEFT,
+    UCS_TABLE_ALIGN_RIGHT,
+    UCS_TABLE_ALIGN_CENTER,
+    UCS_TABLE_ALIGN_LEFT_RIGHT
+} ucs_table_align_t;
+
+
+/*
+ * Internal type. Each cell holds a single text buffer plus an explicit
+ * alignment. The buffer is managed by the table API; callers must not
+ * access it directly. For LEFT_RIGHT cells the buffer must contain
+ * exactly one '\t' (the separator between the left- and right-anchored
+ * portions) by the time the table is rendered.
+ *
+ * `merge_with_above` is an opt-in flag set via
+ * ucs_table_cell_set_merge_with_above(). When set on a LEADING cell of
+ * a row, the separator immediately above that cell renders as a blank
+ * carry-over segment over the cell's column range, instead of the
+ * default "+----+" dashed segment. The flag has no effect on the cell's
+ * own row content rendering, and is ignored on non-leading cells.
  */
 struct ucs_table_cell {
     unsigned            col_span;
-    ucs_string_buffer_t left;
-    ucs_string_buffer_t right;
+    ucs_table_align_t   align;
+    unsigned            merge_with_above : 1;
+    ucs_string_buffer_t text;
 };
 
 
@@ -76,11 +152,17 @@ typedef enum {
 } ucs_table_entry_kind_t;
 
 
+/* Internal type. Dynamic array of cells (declared as a named type so it
+ * can be referenced from both ucs_table_entry_t and stream-row storage
+ * without each use creating a distinct anonymous struct). */
+UCS_ARRAY_DECLARE_TYPE(ucs_table_cells_t, unsigned, ucs_table_cell_t);
+
+
 /* Internal type: one entry in the table is either a row (a vector of
  * cells) or a separator marker. */
 typedef struct {
-    ucs_table_entry_kind_t                  kind;
-    ucs_array_s(unsigned, ucs_table_cell_t) cells;
+    ucs_table_entry_kind_t kind;
+    ucs_table_cells_t      cells;
 } ucs_table_entry_t;
 
 
@@ -101,13 +183,25 @@ typedef struct ucs_table {
      * NULL means no prefix. The table does not own the string; the
      * caller must keep it alive until render/cleanup. */
     const char              *row_prefix;
-    /* Internal scratch: per-body-column widths, allocated for the
-     * duration of a ucs_table_render() call and NULL otherwise. */
+    /* Per-body-column widths. Lazily allocated on the first
+     * ucs_table_render() / ucs_table_print() call and kept alive on
+     * the table until ucs_table_cleanup(). NULL while in the
+     * "building" state, non-NULL once the table has been rendered. */
     int                     *widths;
+    /* Heap-copied minimum per-body-column widths, or NULL. When set,
+     * ucs_table_compute_widths() initializes each column to
+     * min_widths[i] before measuring content, guaranteeing column
+     * widths >= the caller's mins. Owned by the table, freed in
+     * ucs_table_cleanup(). */
+    int                     *min_widths;
     /* When non-zero, ucs_table_render() normalizes every body-column
      * width to the maximum computed width, producing uniformly-wide
      * columns. Default: 0 (per-column widths). */
     int                     equal_widths;
+    /* Number of currently-live stream rows allocated against this
+     * table via ucs_table_stream_row_create(). Asserted to be zero
+     * by ucs_table_cleanup() to catch caller leaks. */
+    unsigned                n_stream_rows;
 } ucs_table_t;
 
 
@@ -149,11 +243,30 @@ void ucs_table_set_equal_widths(ucs_table_t *table, int equal_widths);
 
 
 /*
+ * Lock per-body-column minimum widths. ucs_table_compute_widths()
+ * starts each column at min_widths[i] (or 0 when unset) before
+ * measuring content, so the resulting widths are >= the caller's
+ * minimums. Useful when the caller plans to populate streamed rows
+ * with fixed-width printf formats and needs the table columns to
+ * accommodate them.
+ *
+ * The widths array is copied; the caller does not need to keep it
+ * alive. Pass NULL to clear any previously-set minimums.
+ *
+ * Must be called in the "building" state (before ucs_table_render() /
+ * ucs_table_print()); asserts when the widths are already alive.
+ */
+void ucs_table_set_min_col_widths(ucs_table_t *table, const int *min_widths);
+
+
+/*
  * Append a manual horizontal separator between rows. The renderer decides
- * the separator's exact appearance (carry-over leading cells, leftmost
- * corner) based on the row directly below the separator. Frame separators
- * at the very top and bottom of the table are inserted automatically by
- * render(); do not add them explicitly.
+ * the separator's exact appearance from the row directly below: each
+ * leading cell flagged with ucs_table_cell_set_merge_with_above() renders
+ * as a blank carry-over segment "|     " (and shifts the leftmost corner
+ * from '+' to '|'); the rest of the segments render as dashed "+----".
+ * Frame separators at the very top and bottom of the table are inserted
+ * automatically by render(); do not add them explicitly.
  */
 void ucs_table_add_separator(ucs_table_t *table);
 
@@ -170,54 +283,63 @@ ucs_table_row_t *ucs_table_add_row(ucs_table_t *table);
 
 
 /*
- * Convenience: add a cell whose content is left-anchored, built printf-
- * style. Equivalent to add_cell + cell_appendf_left. The 'f' suffix is
- * omitted to keep all row-level cell setters short; the format-string
- * argument signals printf-style. Returns the newly-added cell so the
- * caller can append additional content (e.g. a right-anchored side).
- */
-ucs_table_cell_t *
-ucs_table_row_add_cell_left(ucs_table_row_t *row, unsigned col_span,
-                            const char *fmt, ...) UCS_F_PRINTF(3, 4);
-
-
-/*
- * Convenience: add a cell whose content is right-anchored, built printf-
- * style. Equivalent to add_cell + cell_appendf_right. Returns the newly-
- * added cell so the caller can append additional content (e.g. a
- * left-anchored side).
- */
-ucs_table_cell_t *
-ucs_table_row_add_cell_right(ucs_table_row_t *row, unsigned col_span,
-                             const char *fmt, ...) UCS_F_PRINTF(3, 4);
-
-
-/*
- * Add an empty cell (both anchors blank) and return a handle that can
- * be passed to cell_appendf_left and cell_appendf_right. Used for
- * split cells that carry independently-anchored content on both sides
- * and for cells whose content is built incrementally.
+ * Add an empty cell with the given alignment and return a handle that
+ * can be passed to ucs_table_cell_appendf() to populate the cell, or
+ * used as-is as an empty/carry-over cell. The handle is valid for the
+ * lifetime of the table.
  *
- * The cell handle is valid for the lifetime of the table.
+ * For UCS_TABLE_ALIGN_LEFT_RIGHT cells, the caller must populate the
+ * cell with content containing exactly one '\t' separating the
+ * left-anchored and right-anchored portions (the '\t' itself reserves
+ * one column of width as the minimum gap between the two halves at
+ * render time).
  */
-ucs_table_cell_t *
-ucs_table_row_add_cell(ucs_table_row_t *row, unsigned col_span);
+ucs_table_cell_t *ucs_table_row_add_cell(ucs_table_row_t *row,
+                                         unsigned col_span,
+                                         ucs_table_align_t align);
 
 
 /*
- * Append printf-style content to the left-anchored side of a cell.
- * Multiple calls concatenate into a single left-anchored string.
+ * One-shot: add a cell with the given alignment and printf-style
+ * content. The cell is owned by the table; no handle is returned.
+ * Preferred form for cells whose content is fully known at the call
+ * site. Equivalent to ucs_table_row_add_cell + ucs_table_cell_appendf.
+ *
+ * The same '\n' / '\t' policy as ucs_table_cell_appendf() applies to
+ * the formatted result.
  */
-void ucs_table_cell_appendf_left(ucs_table_cell_t *cell, const char *fmt, ...)
+void ucs_table_row_add_cell_fmt(ucs_table_row_t *row, unsigned col_span,
+                                ucs_table_align_t align, const char *fmt, ...)
+        UCS_F_PRINTF(4, 5);
+
+
+/*
+ * Append printf-style content to a cell handle returned by
+ * ucs_table_row_add_cell(). Multiple calls concatenate.
+ *
+ * Asserts on the resulting buffer:
+ *   - The text never contains '\n'.
+ *   - For LEFT, RIGHT, CENTER cells: the text never contains '\t'.
+ *   - For LEFT_RIGHT cells: the text contains at most one '\t' during
+ *     incremental appends; the strict "exactly one" check is enforced
+ *     at width-compute and render time.
+ */
+void ucs_table_cell_appendf(ucs_table_cell_t *cell, const char *fmt, ...)
         UCS_F_PRINTF(2, 3);
 
 
 /*
- * Append printf-style content to the right-anchored side of a cell.
- * Multiple calls concatenate into a single right-anchored string.
+ * Mark this cell so the separator IMMEDIATELY ABOVE it renders as a
+ * blank carry-over segment across the cell's column range, instead of
+ * the default "+----+" dashed segment. The cell's own row still
+ * renders its content normally — the flag only affects the separator
+ * above. Only LEADING flagged cells in a row contribute to carry-over;
+ * a flag on a non-leading cell is ignored by the renderer.
+ *
+ * Must be called in the "building" state (before the table has been
+ * rendered); asserts otherwise.
  */
-void ucs_table_cell_appendf_right(ucs_table_cell_t *cell, const char *fmt, ...)
-        UCS_F_PRINTF(2, 3);
+void ucs_table_cell_set_merge_with_above(ucs_table_cell_t *cell);
 
 
 /*
@@ -226,7 +348,8 @@ void ucs_table_cell_appendf_right(ucs_table_cell_t *cell, const char *fmt, ...)
  * maximum cell content per column; merged cells expand the rightmost
  * body column they span if their content does not fit in the existing
  * widths. Separator corner and carry-over rendering are derived from
- * the empty leading cells of the row that follows each separator.
+ * the merge_with_above flag on the leading cells of the row that
+ * follows each separator.
  */
 void ucs_table_render(ucs_table_t *table, ucs_string_buffer_t *strb);
 
@@ -237,6 +360,74 @@ void ucs_table_render(ucs_table_t *table, ucs_string_buffer_t *strb);
  * done; this function only manages the temporary render buffer.
  */
 void ucs_table_print(ucs_table_t *table);
+
+
+/*
+ * Create a new streaming row against `table`. The row is NOT stored in
+ * the table's entries; the caller owns it and must release it via
+ * ucs_table_stream_row_destroy().
+ *
+ * Cells are populated via the regular ucs_table_row_add_cell() /
+ * ucs_table_cell_appendf() API. The row is then printed with
+ * ucs_table_print_row() (or ucs_table_render_row()) against the
+ * table's column widths.
+ *
+ * Must be called after ucs_table_render() / ucs_table_print(), i.e.
+ * once `table->widths` is alive. Asserts otherwise.
+ *
+ * Multiple stream rows can co-exist on the same table; each thread
+ * that emits progress concurrently should hold its own stream row.
+ */
+ucs_table_row_t *ucs_table_stream_row_create(ucs_table_t *table);
+
+
+/*
+ * Reset a stream row so it can be re-populated with different cells.
+ * Frees the cells' string buffers and clears the cell count. The row
+ * is reusable across multiple ucs_table_print_row() calls.
+ *
+ * Cell layout (col_spans, count) may differ between resets — the row
+ * always re-grows up to n_body_cols, no more.
+ */
+void ucs_table_stream_row_reset(ucs_table_row_t *row);
+
+
+/*
+ * Release a stream row. The caller must not use the row after this
+ * call; ucs_table_cleanup() asserts that all stream rows have been
+ * destroyed.
+ */
+void ucs_table_stream_row_destroy(ucs_table_row_t *row);
+
+
+/*
+ * Render a stream row into `strb` using the table's column widths,
+ * WITHOUT a trailing newline. Lets callers splice extra content (e.g.
+ * debug strings) between the row's closing `|` and the line break.
+ *
+ * The row must be a stream row (created via ucs_table_stream_row_create),
+ * and the table must have been rendered at least once (widths alive).
+ */
+void ucs_table_render_row(const ucs_table_row_t *row,
+                          ucs_string_buffer_t *strb);
+
+
+/*
+ * Render a stream row and write it to stdout with a trailing newline.
+ * Thin wrapper around ucs_table_render_row().
+ */
+void ucs_table_print_row(const ucs_table_row_t *row);
+
+
+/*
+ * Write a single horizontal separator (corner-level-0, matches the
+ * bottom-frame line shape) to stdout using the table's column widths.
+ * Used to close a streamed region after one or more ucs_table_print_row()
+ * calls.
+ *
+ * Asserts that the table has been rendered (widths alive).
+ */
+void ucs_table_print_separator(ucs_table_t *table);
 
 
 /*

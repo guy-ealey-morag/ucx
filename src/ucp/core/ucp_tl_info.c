@@ -82,9 +82,10 @@ ucp_tl_info_cmpt_dev_type(const ucp_tl_info_entry_t *all_rscs,
 
 /*
  * Emit one data row and toggle the per-(type, cmpt, tl) "first" flags so
- * that subsequent rows in the same group leave those columns blank.
- * Empty leading columns make the renderer auto-emit carry-over rendering
- * if a separator precedes them.
+ * that subsequent rows in the same group leave those columns blank. The
+ * blank leading cells are flagged with merge_with_above so the renderer
+ * draws a carry-over separator (blank "|     ") above them instead of
+ * a dashed "+---" segment, visually continuing the column from above.
  */
 static void ucp_tl_info_emit_row(ucs_table_t *table, const char *type_str,
                                  const char *cmpt_str, const char *tl_str,
@@ -93,11 +94,27 @@ static void ucp_tl_info_emit_row(ucs_table_t *table, const char *type_str,
                                  int *printed_any)
 {
     ucs_table_row_t *row = ucs_table_add_row(table);
+    ucs_table_cell_t *cell;
 
-    ucs_table_row_add_cell_left(row, 1, "%s", *first_type ? type_str : "");
-    ucs_table_row_add_cell_left(row, 1, "%s", *first_cmpt ? cmpt_str : "");
-    ucs_table_row_add_cell_left(row, 1, "%s", *first_tl ? tl_str : "");
-    ucs_table_row_add_cell_left(row, 1, "%s", dev_str);
+    cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+    if (*first_type) {
+        ucs_table_cell_appendf(cell, "%s", type_str);
+    } else {
+        ucs_table_cell_set_merge_with_above(cell);
+    }
+    cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+    if (*first_cmpt) {
+        ucs_table_cell_appendf(cell, "%s", cmpt_str);
+    } else {
+        ucs_table_cell_set_merge_with_above(cell);
+    }
+    cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+    if (*first_tl) {
+        ucs_table_cell_appendf(cell, "%s", tl_str);
+    } else {
+        ucs_table_cell_set_merge_with_above(cell);
+    }
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", dev_str);
 
     *first_tl    = 0;
     *first_cmpt  = 0;
@@ -112,6 +129,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
     ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
     ucs_table_t table;
     ucs_table_row_t *row;
+    ucs_table_cell_t *cell;
     ucp_rsc_index_t cmpt_idx;
     uct_device_type_t dev_type, cmpt_dev_type;
     unsigned i, j;
@@ -139,15 +157,20 @@ void ucp_context_log_tl_info(ucp_context_h context,
 
     /* Title spans all body columns. */
     row = ucs_table_add_row(&table);
-    ucs_table_row_add_cell_left(row, UCP_TL_INFO_NUM_COLS, "%s", title_buf);
+    ucs_table_row_add_cell_fmt(row, UCP_TL_INFO_NUM_COLS, UCS_TABLE_ALIGN_LEFT,
+                               "%s", title_buf);
     ucs_table_add_separator(&table);
 
     /* Column headers. */
     row = ucs_table_add_row(&table);
-    ucs_table_row_add_cell_left(row, 1, "%s", UCP_TL_INFO_HDR_TYPE);
-    ucs_table_row_add_cell_left(row, 1, "%s", UCP_TL_INFO_HDR_COMPONENT);
-    ucs_table_row_add_cell_left(row, 1, "%s", UCP_TL_INFO_HDR_TRANSPORT);
-    ucs_table_row_add_cell_left(row, 1, "%s", UCP_TL_INFO_HDR_DEVICE);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               UCP_TL_INFO_HDR_TYPE);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               UCP_TL_INFO_HDR_COMPONENT);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               UCP_TL_INFO_HDR_TRANSPORT);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               UCP_TL_INFO_HDR_DEVICE);
     ucs_table_add_separator(&table);
 
     printed_any = 0;
@@ -171,10 +194,10 @@ void ucp_context_log_tl_info(ucp_context_h context,
                 }
 
                 if (first_cmpt && printed_any) {
-                    /* The renderer derives lcorner / first_intact_cols from
-                     * whether the row below has empty leading cells: when
-                     * !first_type, the "type" column on the next row is
-                     * empty and produces a carry-over separator. */
+                    /* The next row's leading cells (type / cmpt) are
+                     * flagged merge_with_above when !first_type /
+                     * !first_cmpt, so this separator renders with a
+                     * carry-over over those columns. */
                     ucs_table_add_separator(&table);
                 }
 
@@ -263,23 +286,27 @@ void ucp_context_log_tl_info(ucp_context_h context,
                     ucs_table_add_separator(&table);
                 }
                 row = ucs_table_add_row(&table);
-                ucs_table_row_add_cell_left(row, 1, "%s",
-                                            UCP_TL_INFO_UNAVAILABLE);
-                ucs_table_row_add_cell_left(
-                        row, 1, "%s", context->tl_cmpts[cmpt_idx].attr.name);
-                ucs_table_row_add_cell_left(row, 1, "%s", "");
-                ucs_table_row_add_cell_left(row, 1, "%s", "");
+                ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                                           UCP_TL_INFO_UNAVAILABLE);
+                ucs_table_row_add_cell_fmt(
+                        row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                        context->tl_cmpts[cmpt_idx].attr.name);
+                ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+                ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
                 first_unavail = 0;
             } else {
-                /* "type" column on the row below stays empty: the
-                 * renderer auto-emits a carry-over separator above. */
+                /* "type" column on the row below stays empty and is
+                 * flagged merge_with_above, so the renderer emits a
+                 * carry-over separator above it. */
                 ucs_table_add_separator(&table);
-                row = ucs_table_add_row(&table);
-                ucs_table_row_add_cell_left(row, 1, "%s", "");
-                ucs_table_row_add_cell_left(
-                        row, 1, "%s", context->tl_cmpts[cmpt_idx].attr.name);
-                ucs_table_row_add_cell_left(row, 1, "%s", "");
-                ucs_table_row_add_cell_left(row, 1, "%s", "");
+                row  = ucs_table_add_row(&table);
+                cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+                ucs_table_cell_set_merge_with_above(cell);
+                ucs_table_row_add_cell_fmt(
+                        row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                        context->tl_cmpts[cmpt_idx].attr.name);
+                ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+                ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
             }
             printed_any = 1;
         }

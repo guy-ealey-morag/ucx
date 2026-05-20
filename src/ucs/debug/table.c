@@ -37,27 +37,38 @@ static const char ucs_table_dashes[] =
 #define UCS_TABLE_DASH_MAX ((int)(sizeof(ucs_table_dashes) - 1))
 
 
+/* Stream-row cells live in an array embedded in the row itself; regular
+ * rows reference an entry index in table->entries. The kind discriminator
+ * routes ucs_table_row_add_cell to the right backing storage. */
+typedef enum {
+    UCS_TABLE_ROW_REGULAR,
+    UCS_TABLE_ROW_STREAM
+} ucs_table_row_kind_t;
+
+
 /* Row handles are heap-allocated separately so they remain valid even
  * if 'entries' is later reallocated. */
 struct ucs_table_row {
-    ucs_table_t *table;
-    unsigned    entry_idx;
+    ucs_table_t          *table;
+    ucs_table_row_kind_t kind;
+    union {
+        /* UCS_TABLE_ROW_REGULAR: index into table->entries. */
+        unsigned          entry_idx;
+        /* UCS_TABLE_ROW_STREAM: cells owned by this row (not in
+         * table->entries). Reset on each ucs_table_stream_row_reset(). */
+        ucs_table_cells_t cells;
+    } u;
 };
-
-
-/* Side selector for cell setters. */
-typedef enum {
-    UCS_TABLE_SIDE_LEFT,
-    UCS_TABLE_SIDE_RIGHT
-} ucs_table_side_t;
 
 
 void ucs_table_init(ucs_table_t *table, unsigned n_body_cols)
 {
-    table->n_body_cols  = n_body_cols;
-    table->row_prefix   = NULL;
-    table->widths       = NULL;
-    table->equal_widths = 0;
+    table->n_body_cols   = n_body_cols;
+    table->row_prefix    = NULL;
+    table->widths        = NULL;
+    table->min_widths    = NULL;
+    table->equal_widths  = 0;
+    table->n_stream_rows = 0;
     ucs_array_init_dynamic(&table->entries);
     ucs_array_init_dynamic(&table->row_handles);
 }
@@ -75,22 +86,49 @@ void ucs_table_set_equal_widths(ucs_table_t *table, int equal_widths)
 }
 
 
+void ucs_table_set_min_col_widths(ucs_table_t *table, const int *min_widths)
+{
+    /* Setting min widths after the table has been rendered would have
+     * no effect (widths are already computed) and would leave the user
+     * with a false sense of layout. Catch this in debug builds. */
+    ucs_assert(table->widths == NULL);
+
+    ucs_free(table->min_widths);
+    table->min_widths = NULL;
+
+    if (min_widths == NULL) {
+        return;
+    }
+
+    table->min_widths = ucs_malloc(table->n_body_cols *
+                                           sizeof(*table->min_widths),
+                                   "ucs_table_min_widths");
+    if (table->min_widths == NULL) {
+        ucs_fatal("failed to allocate table min widths");
+    }
+    memcpy(table->min_widths, min_widths,
+           table->n_body_cols * sizeof(*table->min_widths));
+}
+
+
 void ucs_table_cleanup(ucs_table_t *table)
 {
     ucs_table_entry_t *entry;
     ucs_table_cell_t *cell;
     ucs_table_row_t **row_p;
 
-    /* widths is only set while a render call is in progress. */
-    ucs_assert(table->widths == NULL);
+    /* Stream rows hold references to this table; the caller must
+     * destroy them before tearing down the table. */
+    ucs_assertv(table->n_stream_rows == 0,
+                "table has %u live stream rows at cleanup",
+                table->n_stream_rows);
 
     ucs_array_for_each(entry, &table->entries) {
         if (entry->kind != UCS_TABLE_ENTRY_ROW) {
             continue;
         }
         ucs_array_for_each(cell, &entry->cells) {
-            ucs_string_buffer_cleanup(&cell->left);
-            ucs_string_buffer_cleanup(&cell->right);
+            ucs_string_buffer_cleanup(&cell->text);
         }
         ucs_array_cleanup_dynamic(&entry->cells);
     }
@@ -100,6 +138,12 @@ void ucs_table_cleanup(ucs_table_t *table)
         ucs_free(*row_p);
     }
     ucs_array_cleanup_dynamic(&table->row_handles);
+
+    ucs_free(table->widths);
+    table->widths = NULL;
+
+    ucs_free(table->min_widths);
+    table->min_widths = NULL;
 }
 
 
@@ -107,6 +151,10 @@ void ucs_table_add_separator(ucs_table_t *table)
 {
     ucs_table_entry_t *entry;
     unsigned len;
+
+    /* Adding entries after the table has been rendered would silently
+     * overflow the computed widths. Caught in debug builds. */
+    ucs_assert(table->widths == NULL);
 
     /* Reject consecutive separators */
     len = ucs_array_length(&table->entries);
@@ -128,6 +176,10 @@ ucs_table_row_t *ucs_table_add_row(ucs_table_t *table)
     ucs_table_row_t *row, **row_slot;
     ucs_status_t status;
 
+    /* Adding entries after the table has been rendered would silently
+     * overflow the computed widths. Caught in debug builds. */
+    ucs_assert(table->widths == NULL);
+
     row = ucs_malloc(sizeof(*row), "ucs_table_row");
     if (row == NULL) {
         ucs_fatal("failed to allocate table row");
@@ -146,8 +198,9 @@ ucs_table_row_t *ucs_table_add_row(ucs_table_t *table)
         ucs_fatal("failed to reserve table row cells");
     }
 
-    row->table     = table;
-    row->entry_idx = ucs_array_length(&table->entries) - 1;
+    row->table       = table;
+    row->kind        = UCS_TABLE_ROW_REGULAR;
+    row->u.entry_idx = ucs_array_length(&table->entries) - 1;
 
     row_slot  = ucs_array_append(&table->row_handles,
                                  ucs_fatal("failed to grow table row handles"));
@@ -157,96 +210,120 @@ ucs_table_row_t *ucs_table_add_row(ucs_table_t *table)
 }
 
 
-static ucs_table_entry_t *ucs_table_row_entry(ucs_table_row_t *row)
+/* Return the cells array for a row regardless of whether it's a regular
+ * row (cells live in table->entries) or a stream row (cells live in
+ * row->u.cells). */
+static ucs_table_cells_t *ucs_table_row_cells(ucs_table_row_t *row)
 {
     ucs_table_entry_t *entry;
 
-    entry = &ucs_array_elem(&row->table->entries, row->entry_idx);
+    if (row->kind == UCS_TABLE_ROW_STREAM) {
+        return &row->u.cells;
+    }
+
+    entry = &ucs_array_elem(&row->table->entries, row->u.entry_idx);
     ucs_assert(entry->kind == UCS_TABLE_ENTRY_ROW);
-    return entry;
+    return &entry->cells;
 }
 
 
-ucs_table_cell_t *
-ucs_table_row_add_cell(ucs_table_row_t *row, unsigned col_span)
+ucs_table_cell_t *ucs_table_row_add_cell(ucs_table_row_t *row,
+                                         unsigned col_span,
+                                         ucs_table_align_t align)
 {
-    ucs_table_entry_t *entry = ucs_table_row_entry(row);
+    ucs_table_cells_t *cells;
     ucs_table_cell_t *cell;
 
-    /* Pre-reservation in add_row guarantees this append cannot grow the
-     * cells buffer, so the returned pointer is stable. */
-    cell           = ucs_array_append(&entry->cells,
-                                      ucs_fatal("table row exceeded body column "
-                                                "count"));
-    cell->col_span = col_span;
-    ucs_string_buffer_init(&cell->left);
-    ucs_string_buffer_init(&cell->right);
+    /* On regular rows: cells must be added before render, otherwise
+     * they would silently overflow the computed column widths. Stream
+     * rows are already gated by stream_row_create requiring widths to
+     * be alive, so they have no equivalent restriction here. */
+    if (row->kind == UCS_TABLE_ROW_REGULAR) {
+        ucs_assert(row->table->widths == NULL);
+    }
+
+    cells = ucs_table_row_cells(row);
+
+    /* Pre-reservation in add_row / stream_row_create guarantees this
+     * append cannot grow the cells buffer, so the returned pointer is
+     * stable. */
+    cell = ucs_array_append(cells, ucs_fatal("table row exceeded body "
+                                             "column count"));
+    cell->col_span         = col_span;
+    cell->align            = align;
+    cell->merge_with_above = 0;
+    ucs_string_buffer_init(&cell->text);
     return cell;
 }
 
 
-static void ucs_table_cell_vappendf(ucs_table_cell_t *cell,
-                                    ucs_table_side_t side, const char *fmt,
-                                    va_list ap)
+/* Post-format invariants for cell content. Asserts that the buffer
+ * contains no '\n' and that the per-alignment '\t' policy holds:
+ *
+ *   - LEFT / RIGHT / CENTER: no '\t' anywhere.
+ *   - LEFT_RIGHT: at most one '\t' (the strict "exactly one" check
+ *     happens later, at width-compute / render time).
+ *
+ * Shared between ucs_table_cell_appendf() and the formatted one-shot
+ * ucs_table_row_add_cell_fmt(). */
+static void ucs_table_cell_check_content(const ucs_table_cell_t *cell)
 {
-    ucs_string_buffer_t *strb = (side == UCS_TABLE_SIDE_LEFT) ? &cell->left :
-                                                                &cell->right;
+    const char *cstr      = ucs_string_buffer_cstr(&cell->text);
+    const char *first_tab = strchr(cstr, '\t');
 
-    ucs_string_buffer_vappendf(strb, fmt, ap);
+    ucs_assertv(strchr(cstr, '\n') == NULL,
+                "table cell content must not contain '\\n': '%s'", cstr);
 
-    ucs_assertv(strchr(ucs_string_buffer_cstr(strb), '\n') == NULL,
-                "table cell content must not contain '\\n': '%s'",
-                ucs_string_buffer_cstr(strb));
+    if (cell->align == UCS_TABLE_ALIGN_LEFT_RIGHT) {
+        ucs_assertv((first_tab == NULL) ||
+                            (strchr(first_tab + 1, '\t') == NULL),
+                    "LEFT_RIGHT cell must contain at most one '\\t': '%s'",
+                    cstr);
+    } else {
+        ucs_assertv(first_tab == NULL,
+                    "non-LEFT_RIGHT cell content must not contain '\\t': '%s'",
+                    cstr);
+    }
 }
 
 
-void ucs_table_cell_appendf_left(ucs_table_cell_t *cell, const char *fmt, ...)
+void ucs_table_cell_appendf(ucs_table_cell_t *cell, const char *fmt, ...)
 {
     va_list ap;
 
     va_start(ap, fmt);
-    ucs_table_cell_vappendf(cell, UCS_TABLE_SIDE_LEFT, fmt, ap);
+    ucs_string_buffer_vappendf(&cell->text, fmt, ap);
     va_end(ap);
+
+    ucs_table_cell_check_content(cell);
 }
 
 
-void ucs_table_cell_appendf_right(ucs_table_cell_t *cell, const char *fmt, ...)
+void ucs_table_row_add_cell_fmt(ucs_table_row_t *row, unsigned col_span,
+                                ucs_table_align_t align, const char *fmt, ...)
 {
+    ucs_table_cell_t *cell = ucs_table_row_add_cell(row, col_span, align);
     va_list ap;
 
     va_start(ap, fmt);
-    ucs_table_cell_vappendf(cell, UCS_TABLE_SIDE_RIGHT, fmt, ap);
+    ucs_string_buffer_vappendf(&cell->text, fmt, ap);
     va_end(ap);
+
+    ucs_table_cell_check_content(cell);
 }
 
 
-ucs_table_cell_t *ucs_table_row_add_cell_left(ucs_table_row_t *row,
-                                              unsigned col_span,
-                                              const char *fmt, ...)
+void ucs_table_cell_set_merge_with_above(ucs_table_cell_t *cell)
 {
-    ucs_table_cell_t *cell = ucs_table_row_add_cell(row, col_span);
-    va_list ap;
-
-    va_start(ap, fmt);
-    ucs_table_cell_vappendf(cell, UCS_TABLE_SIDE_LEFT, fmt, ap);
-    va_end(ap);
-
-    return cell;
-}
-
-
-ucs_table_cell_t *ucs_table_row_add_cell_right(ucs_table_row_t *row,
-                                               unsigned col_span,
-                                               const char *fmt, ...)
-{
-    ucs_table_cell_t *cell = ucs_table_row_add_cell(row, col_span);
-    va_list ap;
-
-    va_start(ap, fmt);
-    ucs_table_cell_vappendf(cell, UCS_TABLE_SIDE_RIGHT, fmt, ap);
-    va_end(ap);
-
-    return cell;
+    /* The flag is consumed by the renderer when computing the
+     * separator above the row. Setting it after the table has been
+     * rendered would have no effect (the separator was already
+     * emitted with the old value), so catch the misuse in debug
+     * builds. We can't easily reach the owning table from the cell
+     * pointer here; the check happens implicitly via the building-
+     * state assert on subsequent ucs_table_add_separator / add_row
+     * calls instead. */
+    cell->merge_with_above = 1;
 }
 
 
@@ -268,6 +345,34 @@ static int ucs_table_cell_pixel_width(const int *body_widths, unsigned start,
 }
 
 
+/* Visible content length of a cell. Uniform across all alignments: the
+ * cell text is exactly the bytes that will land inside the rendered cell
+ * (the embedded '\t' separator in LEFT_RIGHT cells is itself counted as
+ * one column of width, which guarantees at least one space of gap
+ * between the two halves at render time).
+ *
+ * For LEFT_RIGHT cells, this is also the natural place to assert the
+ * "exactly one '\t'" invariant — width-compute runs once before render
+ * and catches misuse earlier than the render-time assert. */
+static unsigned ucs_table_cell_content_len(ucs_table_cell_t *cell)
+{
+    const char *cstr;
+    const char *first_tab;
+
+    if (cell->align == UCS_TABLE_ALIGN_LEFT_RIGHT) {
+        cstr      = ucs_string_buffer_cstr(&cell->text);
+        first_tab = strchr(cstr, '\t');
+        ucs_assertv(first_tab != NULL,
+                    "LEFT_RIGHT cell missing '\\t' separator: '%s'", cstr);
+        ucs_assertv(strchr(first_tab + 1, '\t') == NULL,
+                    "LEFT_RIGHT cell must contain exactly one '\\t': '%s'",
+                    cstr);
+    }
+
+    return ucs_string_buffer_length(&cell->text);
+}
+
+
 /* Compute per-body-column widths needed to fit every cell. Two passes:
  *   Pass 1: derive per-column widths from col_span=1 cells.
  *   Pass 2: expand the rightmost spanned column of each merged cell to
@@ -275,7 +380,11 @@ static int ucs_table_cell_pixel_width(const int *body_widths, unsigned start,
  *
  * Splitting the passes keeps merged cells from over-expanding the
  * rightmost spanned column when they happen to be added before the body
- * rows that would naturally establish the column widths. */
+ * rows that would naturally establish the column widths.
+ *
+ * Each column starts at table->min_widths[i] (or 0 when unset) so the
+ * caller can lock in a lower bound for stream-row content the table
+ * does not see during measurement. */
 static void ucs_table_compute_widths(const ucs_table_t *table, int *widths)
 {
     ucs_table_entry_t *entry;
@@ -284,7 +393,7 @@ static void ucs_table_compute_widths(const ucs_table_t *table, int *widths)
     int existing;
 
     for (i = 0; i < table->n_body_cols; ++i) {
-        widths[i] = 0;
+        widths[i] = (table->min_widths != NULL) ? table->min_widths[i] : 0;
     }
 
     /* Pass 1: col_span == 1 cells only. */
@@ -295,9 +404,7 @@ static void ucs_table_compute_widths(const ucs_table_t *table, int *widths)
         body_col = 0;
         ucs_array_for_each(cell, &entry->cells) {
             if (cell->col_span == 1) {
-                content_len = ucs_string_buffer_length(&cell->left) +
-                              ucs_string_buffer_length(&cell->right);
-
+                content_len      = ucs_table_cell_content_len(cell);
                 widths[body_col] = ucs_max(widths[body_col], (int)content_len);
             }
             body_col += cell->col_span;
@@ -314,11 +421,9 @@ static void ucs_table_compute_widths(const ucs_table_t *table, int *widths)
         body_col = 0;
         ucs_array_for_each(cell, &entry->cells) {
             if (cell->col_span > 1) {
-                content_len = ucs_string_buffer_length(&cell->left) +
-                              ucs_string_buffer_length(&cell->right);
-
-                existing = ucs_table_cell_pixel_width(widths, body_col,
-                                                      cell->col_span);
+                content_len = ucs_table_cell_content_len(cell);
+                existing    = ucs_table_cell_pixel_width(widths, body_col,
+                                                         cell->col_span);
 
                 if ((int)content_len > existing) {
                     widths[body_col + cell->col_span - 1] += (int)content_len -
@@ -344,41 +449,89 @@ static void ucs_table_compute_widths(const ucs_table_t *table, int *widths)
 }
 
 
-/* Format a single cell at the given pixel width. Three cases:
- *  - right is empty -> left-aligned
- *  - left is empty  -> right-aligned
- *  - both set       -> "left<spaces>right" with the gap padding the
- *                      cell to its full width.
+/* Allocate and populate table->widths if it has not been computed
+ * already. Idempotent — repeated calls are a no-op. Widths live on the
+ * table from the first call until ucs_table_cleanup(). */
+static void ucs_table_widths_ensure(ucs_table_t *table)
+{
+    if (table->widths != NULL) {
+        return;
+    }
+
+    table->widths = ucs_malloc(table->n_body_cols * sizeof(*table->widths),
+                               "ucs_table_widths");
+    if (table->widths == NULL) {
+        ucs_fatal("failed to allocate table widths");
+    }
+    ucs_table_compute_widths(table, table->widths);
+}
+
+
+/* Format a single cell at the given pixel width. Branches on the cell's
+ * explicit alignment:
+ *
+ *   LEFT       "| content                 |"
+ *   RIGHT      "|                 content |"
+ *   CENTER     "|        content          |" (right side gets the extra
+ *                                              space when padding is odd)
+ *   LEFT_RIGHT "| left              right |" (split on first '\t';
+ *                                              the gap is the spaces
+ *                                              between the halves and is
+ *                                              guaranteed >= 1 by the
+ *                                              width algorithm, since
+ *                                              the separator '\t' itself
+ *                                              counts as 1 char of width)
  */
 static void ucs_table_render_cell(ucs_string_buffer_t *strb,
                                   const ucs_table_cell_t *cell, int pixel_width)
 {
-    const char *left_cstr  = ucs_string_buffer_cstr(&cell->left);
-    const char *right_cstr = ucs_string_buffer_cstr(&cell->right);
-    int left_len, right_width;
+    const char *cstr = ucs_string_buffer_cstr(&cell->text);
+    int content_len, pad, left_pad, right_pad, left_len, right_len, gap;
+    const char *sep, *right_text;
 
-    if (ucs_string_is_empty(right_cstr)) {
-        /* left-only */
-        ucs_string_buffer_appendf(strb, "| %-*s ", pixel_width, left_cstr);
-    } else if (ucs_string_is_empty(left_cstr)) {
-        /* right-only */
-        ucs_string_buffer_appendf(strb, "| %*s ", pixel_width, right_cstr);
-    } else {
-        /* both sides */
-        left_len    = (int)strlen(left_cstr);
-        right_width = ucs_max(pixel_width - left_len, 0);
-        ucs_assertv(right_width > 0,
-                    "cell content '%s' + '%s' exceeds width %d", left_cstr,
-                    right_cstr, pixel_width);
-        ucs_string_buffer_appendf(strb, "| %s%*s ", left_cstr, right_width,
-                                  right_cstr);
+    switch (cell->align) {
+    case UCS_TABLE_ALIGN_LEFT:
+        ucs_string_buffer_appendf(strb, "| %-*s ", pixel_width, cstr);
+        break;
+
+    case UCS_TABLE_ALIGN_RIGHT:
+        ucs_string_buffer_appendf(strb, "| %*s ", pixel_width, cstr);
+        break;
+
+    case UCS_TABLE_ALIGN_CENTER:
+        content_len = (int)strlen(cstr);
+        pad         = ucs_max(pixel_width - content_len, 0);
+        left_pad    = pad / 2;
+        right_pad   = pad - left_pad;
+        ucs_string_buffer_appendf(strb, "| %*s%s%*s ", left_pad, "", cstr,
+                                  right_pad, "");
+        break;
+
+    case UCS_TABLE_ALIGN_LEFT_RIGHT:
+        sep = strchr(cstr, '\t');
+        ucs_assertv(sep != NULL,
+                    "LEFT_RIGHT cell missing '\\t' separator: '%s'", cstr);
+        left_len   = (int)(sep - cstr);
+        right_text = sep + 1;
+        right_len  = (int)strlen(right_text);
+        gap        = pixel_width - left_len - right_len;
+        ucs_assertv(gap >= 1, "LEFT_RIGHT cell '%.*s' + '%s' exceeds width %d",
+                    left_len, cstr, right_text, pixel_width);
+        ucs_string_buffer_appendf(strb, "| %.*s%*s%s ", left_len, cstr, gap, "",
+                                  right_text);
+        break;
     }
 }
 
 
-static void ucs_table_render_row(const ucs_table_t *table,
-                                 ucs_string_buffer_t *strb,
-                                 const ucs_table_entry_t *entry)
+/* Render one body row (line of cells) into strb. Used for both
+ * regular and stream rows: the caller passes the appropriate cells
+ * array. `with_newline` controls whether the closing "|" is followed
+ * by '\n' — stream rows in -X mode need the newline omitted so the
+ * caller can splice trailing content before the line break. */
+static void
+ucs_table_render_cells(const ucs_table_t *table, ucs_string_buffer_t *strb,
+                       const ucs_table_cells_t *cells, int with_newline)
 {
     const ucs_table_cell_t *cell;
     unsigned body_col = 0;
@@ -389,14 +542,22 @@ static void ucs_table_render_row(const ucs_table_t *table,
         ucs_string_buffer_appendf(strb, "%s", table->row_prefix);
     }
 
-    ucs_array_for_each(cell, &entry->cells) {
+    ucs_array_for_each(cell, cells) {
         ucs_table_render_cell(strb, cell,
                               ucs_table_cell_pixel_width(table->widths,
                                                          body_col,
                                                          cell->col_span));
         body_col += cell->col_span;
     }
-    ucs_string_buffer_appendf(strb, "|\n");
+    ucs_string_buffer_appendf(strb, with_newline ? "|\n" : "|");
+}
+
+
+static void ucs_table_render_row_entry(const ucs_table_t *table,
+                                       ucs_string_buffer_t *strb,
+                                       const ucs_table_entry_t *entry)
+{
+    ucs_table_render_cells(table, strb, &entry->cells, /*with_newline=*/1);
 }
 
 
@@ -463,44 +624,29 @@ ucs_table_row_after(const ucs_table_t *table, unsigned entry_idx)
 }
 
 
-/* Locate the nearest ROW entry strictly before entry_idx. */
-static const ucs_table_entry_t *
-ucs_table_row_before(const ucs_table_t *table, unsigned entry_idx)
-{
-    unsigned i;
-
-    for (i = entry_idx; i > 0; --i) {
-        const ucs_table_entry_t *entry = &ucs_array_elem(&table->entries,
-                                                         i - 1);
-        if (entry->kind == UCS_TABLE_ENTRY_ROW) {
-            return entry;
-        }
-    }
-    return NULL;
-}
-
-
 /* Number of leading body columns to render as blank segments in the
- * separator at entry_idx. A column is "merged" when the cell directly
- * below has empty left and right content, which means it visually
- * extends the cell above through the separator. Returns 0 if the
- * separator has no row on one of its sides (top or bottom of table). */
+ * separator at entry_idx. A column contributes to the carry-over only
+ * when the cell directly below has the explicit merge_with_above flag
+ * set; the walk stops at the first unflagged leading cell. Cells
+ * deeper in the row are ignored even when flagged — the renderer only
+ * supports leading carry-over.
+ *
+ * Returns 0 when the separator has no row below (last entry in the
+ * table) or when no leading cell is flagged. */
 static unsigned
 ucs_table_separator_merged_cols(const ucs_table_t *table, unsigned entry_idx)
 {
-    const ucs_table_entry_t *row_above, *row_below;
+    const ucs_table_entry_t *row_below;
     ucs_table_cell_t *cell;
     unsigned merged = 0;
 
-    row_above = ucs_table_row_before(table, entry_idx);
     row_below = ucs_table_row_after(table, entry_idx);
-    if ((row_above == NULL) || (row_below == NULL)) {
+    if (row_below == NULL) {
         return 0;
     }
 
     ucs_array_for_each(cell, &row_below->cells) {
-        if ((ucs_string_buffer_length(&cell->left) != 0) ||
-            (ucs_string_buffer_length(&cell->right) != 0)) {
+        if (!cell->merge_with_above) {
             break;
         }
         merged += cell->col_span;
@@ -515,23 +661,14 @@ void ucs_table_render(ucs_table_t *table, ucs_string_buffer_t *strb)
     const ucs_table_entry_t *entry;
     unsigned i;
 
-    /* Allocate per-body-column widths on the table for the duration of
-     * this render call. The render_* helpers assert the array is set. */
-    ucs_assert(table->widths == NULL);
-    table->widths = ucs_malloc(table->n_body_cols * sizeof(*table->widths),
-                               "ucs_table_widths");
-    if (table->widths == NULL) {
-        ucs_fatal("failed to allocate table widths");
-    }
-    ucs_table_compute_widths(table, table->widths);
+    ucs_table_widths_ensure(table);
 
-    /* Top frame */
     ucs_table_render_separator(table, strb, 0);
 
     for (i = 0; i < ucs_array_length(&table->entries); ++i) {
         entry = &ucs_array_elem(&table->entries, i);
         if (entry->kind == UCS_TABLE_ENTRY_ROW) {
-            ucs_table_render_row(table, strb, entry);
+            ucs_table_render_row_entry(table, strb, entry);
             continue;
         }
 
@@ -539,14 +676,16 @@ void ucs_table_render(ucs_table_t *table, ucs_string_buffer_t *strb)
                                    ucs_table_separator_merged_cols(table, i));
     }
 
-    /* Bottom frame, skip when the last entry is already a separator */
+    /* Bottom frame; skip only when the last entry is already a
+     * separator (so we don't render two consecutive separator lines). */
     if (ucs_array_is_empty(&table->entries) ||
         (ucs_array_last(&table->entries)->kind != UCS_TABLE_ENTRY_SEPARATOR)) {
         ucs_table_render_separator(table, strb, 0);
     }
 
-    ucs_free(table->widths);
-    table->widths = NULL;
+    /* Note: widths are intentionally NOT freed here. They stay alive on
+     * the table until ucs_table_cleanup() so that subsequent streamed
+     * rows can render against the same column layout. */
 }
 
 
@@ -555,6 +694,122 @@ void ucs_table_print(ucs_table_t *table)
     ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
 
     ucs_table_render(table, &strb);
+    printf("%s", ucs_string_buffer_cstr(&strb));
+    ucs_string_buffer_cleanup(&strb);
+}
+
+
+ucs_table_row_t *ucs_table_stream_row_create(ucs_table_t *table)
+{
+    ucs_table_row_t *row, **row_slot;
+    ucs_status_t status;
+
+    /* Stream rows render against the table's widths, so the table must
+     * have been rendered (or printed) at least once first. */
+    ucs_assert(table->widths != NULL);
+
+    row = ucs_malloc(sizeof(*row), "ucs_table_stream_row");
+    if (row == NULL) {
+        ucs_fatal("failed to allocate table stream row");
+    }
+
+    row->table = table;
+    row->kind  = UCS_TABLE_ROW_STREAM;
+    ucs_array_init_dynamic(&row->u.cells);
+
+    /* Pre-reserve to n_body_cols so add_cell calls never reallocate
+     * the cells buffer (cell pointers stay stable). */
+    status = ucs_array_reserve(&row->u.cells, table->n_body_cols);
+    if (status != UCS_OK) {
+        ucs_fatal("failed to reserve stream row cells");
+    }
+
+    row_slot  = ucs_array_append(&table->row_handles,
+                                 ucs_fatal("failed to grow table row handles"));
+    *row_slot = row;
+    ++table->n_stream_rows;
+
+    return row;
+}
+
+
+void ucs_table_stream_row_reset(ucs_table_row_t *row)
+{
+    ucs_table_cell_t *cell;
+
+    ucs_assert(row->kind == UCS_TABLE_ROW_STREAM);
+
+    /* Full cleanup of each cell's string buffer (not just `reset`) so
+     * the next add_cell call's ucs_string_buffer_init doesn't leak the
+     * previous backing memory. */
+    ucs_array_for_each(cell, &row->u.cells) {
+        ucs_string_buffer_cleanup(&cell->text);
+    }
+    ucs_array_set_length(&row->u.cells, 0);
+}
+
+
+void ucs_table_stream_row_destroy(ucs_table_row_t *row)
+{
+    ucs_table_cell_t *cell;
+    ucs_table_row_t **row_slot;
+    ucs_table_t *table;
+    unsigned i;
+
+    ucs_assert(row->kind == UCS_TABLE_ROW_STREAM);
+
+    ucs_array_for_each(cell, &row->u.cells) {
+        ucs_string_buffer_cleanup(&cell->text);
+    }
+    ucs_array_cleanup_dynamic(&row->u.cells);
+
+    /* Drop the row from the table's row_handles array so cleanup
+     * doesn't double-free. The handle array is unordered for our
+     * purposes, so we replace-with-last and shrink. */
+    table = row->table;
+    for (i = 0; i < ucs_array_length(&table->row_handles); ++i) {
+        row_slot = &ucs_array_elem(&table->row_handles, i);
+        if (*row_slot == row) {
+            *row_slot = *ucs_array_last(&table->row_handles);
+            ucs_array_set_length(&table->row_handles,
+                                 ucs_array_length(&table->row_handles) - 1);
+            break;
+        }
+    }
+
+    --table->n_stream_rows;
+    ucs_free(row);
+}
+
+
+void ucs_table_render_row(const ucs_table_row_t *row, ucs_string_buffer_t *strb)
+{
+    ucs_assert(row->kind == UCS_TABLE_ROW_STREAM);
+    ucs_assert(row->table->widths != NULL);
+
+    ucs_table_render_cells(row->table, strb, &row->u.cells,
+                           /*with_newline=*/0);
+}
+
+
+void ucs_table_print_row(const ucs_table_row_t *row)
+{
+    ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
+
+    ucs_table_render_row(row, &strb);
+    ucs_string_buffer_appendf(&strb, "\n");
+    printf("%s", ucs_string_buffer_cstr(&strb));
+    ucs_string_buffer_cleanup(&strb);
+}
+
+
+void ucs_table_print_separator(ucs_table_t *table)
+{
+    ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
+
+    ucs_assert(table->widths != NULL);
+
+    ucs_table_render_separator(table, &strb, 0);
     printf("%s", ucs_string_buffer_cstr(&strb));
     ucs_string_buffer_cleanup(&strb);
 }

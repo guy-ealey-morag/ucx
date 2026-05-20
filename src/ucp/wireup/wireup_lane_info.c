@@ -191,16 +191,20 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
 
     /* Title spans all body columns. */
     row = ucs_table_add_row(&table);
-    ucs_table_row_add_cell_left(row, UCP_EP_LANE_INFO_NUM_COLS, "%s",
-                                title_buf);
+    ucs_table_row_add_cell_fmt(row, UCP_EP_LANE_INFO_NUM_COLS,
+                               UCS_TABLE_ALIGN_LEFT, "%s", title_buf);
     ucs_table_add_separator(&table);
 
     /* Column headers. */
     row = ucs_table_add_row(&table);
-    ucs_table_row_add_cell_left(row, 1, "%s", UCP_EP_LANE_INFO_HDR_TL);
-    ucs_table_row_add_cell_left(row, 1, "%s", UCP_EP_LANE_INFO_HDR_DEV);
-    ucs_table_row_add_cell_left(row, 1, "%s", UCP_EP_LANE_INFO_HDR_COUNT);
-    ucs_table_row_add_cell_left(row, 1, "%s", UCP_EP_LANE_INFO_HDR_TYPES);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               UCP_EP_LANE_INFO_HDR_TL);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               UCP_EP_LANE_INFO_HDR_DEV);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               UCP_EP_LANE_INFO_HDR_COUNT);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               UCP_EP_LANE_INFO_HDR_TYPES);
     ucs_table_add_separator(&table);
 
     printed_any = 0;
@@ -232,10 +236,12 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
         ucp_wireup_format_lane_types(types_union, types_buf, sizeof(types_buf));
 
         row = ucs_table_add_row(&table);
-        ucs_table_row_add_cell_left(row, 1, "%s", first_tl ? tl_name : "");
-        ucs_table_row_add_cell_left(row, 1, "%s", dev_buf);
-        ucs_table_row_add_cell_left(row, 1, "%d", count);
-        ucs_table_row_add_cell_left(row, 1, "%s", types_buf);
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                                   first_tl ? tl_name : "");
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", dev_buf);
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%d", count);
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                                   types_buf);
 
         printed_any = 1;
     }

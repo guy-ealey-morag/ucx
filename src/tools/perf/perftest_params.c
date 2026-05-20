@@ -1,5 +1,5 @@
 /**
-* Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2021. ALL RIGHTS RESERVED.
+* Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2021-2026. ALL RIGHTS RESERVED.
 *
 * See file LICENSE for terms.
 */
@@ -906,13 +906,16 @@ ucs_status_t parse_opts(struct perftest_context *ctx, int mpi_initialized,
         return status;
     }
 
-    ctx->server_addr     = NULL;
-    ctx->num_batch_files = 0;
-    ctx->port            = 13337;
-    ctx->af              = AF_INET;
-    ctx->flags           = 0;
-    ctx->mpi             = mpi_initialized;
-    ctx->mad_port        = NULL;
+    ctx->server_addr         = NULL;
+    ctx->num_batch_files     = 0;
+    ctx->port                = 13337;
+    ctx->af                  = AF_INET;
+    ctx->flags               = 0;
+    ctx->mpi                 = mpi_initialized;
+    ctx->mad_port            = NULL;
+    ctx->results_stream_rows = NULL;
+    ctx->n_stream_rows       = 0;
+    ctx->max_test_name_width = 0;
 
     optind = 1;
     while ((c = getopt_long(argc, argv,
