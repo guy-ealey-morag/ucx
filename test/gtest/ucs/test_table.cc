@@ -233,24 +233,24 @@ UCS_TEST_F(test_table, left_right_incremental_appends_concatenate_around_tab) {
 }
 
 
-/* Group D: auto carry-over separators */
+/* Group D: separator carry-over via explicit merged_cols */
 
 UCS_TEST_F(test_table,
-           separator_with_empty_leading_cell_below_uses_carry_over) {
-    /* Row above has both cells set. Separator follows. Row below leaves
-     * the leading cell empty AND flags it merge_with_above. Expected:
-     * leftmost separator segment is a blank "|     " (carry-over), the
-     * rest is a dashed "+-----" segment. */
+           separator_with_merged_cols_renders_blank_leading_segment) {
+    /* Row above has both cells set. Separator with merged_cols=1
+     * follows. Row below leaves the leading cell empty so the visual
+     * column-merge effect lines up. Expected: leftmost separator
+     * segment is a blank "|     " (carry-over), the rest is a dashed
+     * "+-----" segment. */
     table_t table(2);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "type");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "data1");
-    ucs_table_add_separator(table.get());
+    ucs_table_add_separator_with_merged_cells(table.get(), 1);
 
     row = ucs_table_add_row(table.get());
-    ucs_table_cell_set_merge_with_above(
-            ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT));
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "data2");
 
     EXPECT_EQ("+------+-------+\n"
@@ -261,9 +261,10 @@ UCS_TEST_F(test_table,
               table.render());
 }
 
-UCS_TEST_F(test_table, separator_without_empty_leading_cells_uses_plus_corner) {
-    /* All leading cells of row below are non-empty: regular "+-----+"
-     * separator with no carry-over. */
+UCS_TEST_F(test_table, separator_without_merged_cols_uses_plus_corner) {
+    /* Plain separator (no merged_cols) renders fully dashed
+     * "+-----+" regardless of whether the row below has empty
+     * leading cells. */
     table_t table(2);
 
     auto *row = ucs_table_add_row(table.get());
@@ -284,11 +285,10 @@ UCS_TEST_F(test_table, separator_without_empty_leading_cells_uses_plus_corner) {
 }
 
 UCS_TEST_F(test_table, separator_at_table_edges_is_always_plain_frame) {
-    /* A separator immediately after the last row has no row below; it
-     * collapses to the regular bottom-frame style with no carry-over.
-     * Since that line is byte-identical to the auto-appended bottom
-     * frame, render() suppresses the auto bottom frame so the table
-     * ends with a single "+---+--+" line rather than two duplicated
+    /* A plain separator immediately after the last row has no row
+     * below; the bottom-frame line is byte-identical to it, so
+     * render() suppresses the auto bottom frame and the table ends
+     * with a single "+---+--+" line rather than two duplicated
      * frames. */
     table_t table(2);
 
@@ -303,12 +303,11 @@ UCS_TEST_F(test_table, separator_at_table_edges_is_always_plain_frame) {
               table.render());
 }
 
-UCS_TEST_F(test_table, separator_merge_with_above_flag_triggers_carry_over) {
-    /* Positive test: a single LEADING cell flagged merge_with_above
-     * causes the separator above to render its leftmost segment as a
-     * blank "|     " carry-over, leaving the remaining segments
-     * dashed. The leftmost corner shifts from '+' to '|' to signal
-     * the carry-over. */
+UCS_TEST_F(test_table, separator_with_merged_cols_one_blanks_first_column) {
+    /* Positive test: merged_cols=1 makes the leftmost separator
+     * segment render as a blank "|     " carry-over and shifts the
+     * leftmost corner from '+' to '|'. The remaining segments stay
+     * dashed. */
     table_t table(2);
     const int min_widths[2] = {3, 3};
     ucs_table_set_min_col_widths(table.get(), min_widths);
@@ -316,11 +315,10 @@ UCS_TEST_F(test_table, separator_merge_with_above_flag_triggers_carry_over) {
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "y");
-    ucs_table_add_separator(table.get());
+    ucs_table_add_separator_with_merged_cells(table.get(), 1);
 
     row = ucs_table_add_row(table.get());
-    ucs_table_cell_set_merge_with_above(
-            ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT));
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "z");
 
     EXPECT_EQ("+-----+-----+\n"
@@ -332,11 +330,10 @@ UCS_TEST_F(test_table, separator_merge_with_above_flag_triggers_carry_over) {
 }
 
 UCS_TEST_F(test_table,
-           separator_empty_leading_cell_without_flag_does_not_carry_over) {
-    /* Regression: with the auto-detect-empty heuristic gone, a row
-     * whose leading cell is empty but UNFLAGGED must produce a fully
-     * dashed separator (no carry-over). This catches accidental
-     * reintroduction of the empty-cell heuristic. */
+           separator_with_zero_merged_cols_renders_plain_when_row_below_blank) {
+    /* Regression: an empty leading cell on the row below must NOT
+     * influence the separator. Carry-over is decided purely by the
+     * separator's merged_cols value. */
     table_t table(2);
     const int min_widths[2] = {3, 3};
     ucs_table_set_min_col_widths(table.get(), min_widths);
@@ -347,7 +344,7 @@ UCS_TEST_F(test_table,
     ucs_table_add_separator(table.get());
 
     row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT); /* empty, no flag */
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT); /* empty */
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "z");
 
     EXPECT_EQ("+-----+-----+\n"
@@ -358,13 +355,11 @@ UCS_TEST_F(test_table,
               table.render());
 }
 
-UCS_TEST_F(test_table,
-           separator_merge_with_above_stops_at_first_unflagged_cell) {
-    /* Ordering: the walk over leading flagged cells stops at the
-     * first unflagged cell, even if a later cell carries the flag.
-     * Here col 0 is flagged, col 1 is not, col 2 is flagged: only
-     * col 0 contributes to the carry-over; col 2's flag is ignored
-     * because it isn't part of the contiguous leading run. */
+UCS_TEST_F(test_table, separator_with_merged_cols_only_blanks_leading_columns) {
+    /* merged_cols=1 in a 3-column table only blanks the leading
+     * column; the trailing two columns render as dashed segments
+     * regardless of what content (or lack thereof) the row below
+     * has in those columns. */
     table_t table(3);
     const int min_widths[3] = {3, 3, 3};
     ucs_table_set_min_col_widths(table.get(), min_widths);
@@ -373,15 +368,12 @@ UCS_TEST_F(test_table,
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "c");
-    ucs_table_add_separator(table.get());
+    ucs_table_add_separator_with_merged_cells(table.get(), 1);
 
     row = ucs_table_add_row(table.get());
-    ucs_table_cell_set_merge_with_above(
-            ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT));
-    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT); /* unflagged */
-    ucs_table_cell_set_merge_with_above(
-            /* ignored: not leading */
-            ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT));
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
 
     EXPECT_EQ("+-----+-----+-----+\n"
               "| a   | b   | c   |\n"
@@ -392,13 +384,13 @@ UCS_TEST_F(test_table,
 }
 
 UCS_TEST_F(test_table,
-           separator_merge_with_above_with_col_span_covers_full_span) {
-    /* A leading flagged cell with col_span=2 contributes its full
-     * span (cols 0-1) to the carry-over. The separator above renders
-     * blank across both columns, with a '|' leftmost corner, a
-     * blank-to-blank corner '+' between the merged segments, and
-     * dashed segments for the rest. Mirrors the canonical use case
-     * of a leading "category" cell that spans multiple body columns. */
+           separator_with_merged_cols_two_blanks_two_leading_columns) {
+    /* merged_cols=2 in a 3-column table blanks the leading two body
+     * columns. The leftmost corner is '|', the corner between the
+     * two merged segments is also '|', and the trailing dashed
+     * segment closes with a regular '+'. Mirrors the canonical use
+     * case of a leading "category" cell that spans two body
+     * columns. */
     table_t table(3);
     const int min_widths[3] = {3, 3, 3};
     ucs_table_set_min_col_widths(table.get(), min_widths);
@@ -406,18 +398,58 @@ UCS_TEST_F(test_table,
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_LEFT, "%s", "ab");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
-    ucs_table_add_separator(table.get());
+    ucs_table_add_separator_with_merged_cells(table.get(), 2);
 
     row = ucs_table_add_row(table.get());
-    ucs_table_cell_set_merge_with_above(
-            ucs_table_row_add_cell(row, 2, UCS_TABLE_ALIGN_LEFT));
+    ucs_table_row_add_cell(row, 2, UCS_TABLE_ALIGN_LEFT);
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "y");
 
     EXPECT_EQ("+-----+-----+-----+\n"
               "| ab        | x   |\n"
-              "|     +     +-----+\n"
+              "|     |     +-----+\n"
               "|           | y   |\n"
               "+-----+-----+-----+\n",
+              table.render());
+}
+
+UCS_TEST_F(test_table,
+           separator_merged_cols_captured_at_add_time_not_inferred_from_row) {
+    /* Regression: each separator captures its own merged_cols when
+     * it is added; later changes to the row that follows must NOT
+     * retroactively change how that separator renders. Two
+     * separators with different merged_cols values appear in the
+     * same table and render independently. */
+    table_t table(2);
+    const int min_widths[2] = {3, 3};
+    ucs_table_set_min_col_widths(table.get(), min_widths);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b");
+
+    /* First separator: merged_cols=1 even though the row below has
+     * non-empty leading cells. */
+    ucs_table_add_separator_with_merged_cells(table.get(), 1);
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "c");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "d");
+
+    /* Second separator: plain even though the row below has an
+     * empty leading cell. */
+    ucs_table_add_separator(table.get());
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "e");
+
+    EXPECT_EQ("+-----+-----+\n"
+              "| a   | b   |\n"
+              "|     +-----+\n"
+              "| c   | d   |\n"
+              "+-----+-----+\n"
+              "|     | e   |\n"
+              "+-----+-----+\n",
               table.render());
 }
 
@@ -520,6 +552,81 @@ UCS_TEST_F(test_table, printf_formatting_supported_by_all_alignments) {
 
 
 /* Group H: integration - mirrors the proto_debug layout */
+
+UCS_TEST_F(test_table, integration_tl_info_like_layout) {
+    /* Mirrors the ucp_tl_info table shape: 4 body columns
+     * (Type | Component | Transport | Device) with three flavors of
+     * inter-row separator:
+     *  - plain (merged_cols=0) between dev_types,
+     *  - merged_cols=1 between components within the same dev_type
+     *    (Type column carries over),
+     *  - merged_cols=2 between TLs within the same component
+     *    (Type and Component columns carry over).
+     * Columns below the carry-over are left empty so the "merged"
+     * cell visually continues across the divider. */
+    table_t table(4);
+
+    auto *row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "Type");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "Component");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "Transport");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "Device");
+    ucs_table_add_separator(table.get());
+
+    /* network / tcp / + tcp */
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "network");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "tcp");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "+ tcp");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "dev_a");
+
+    /* New component within network: type carries over (1 col). */
+    ucs_table_add_separator_with_merged_cells(table.get(), 1);
+
+    /* network / ib / - rc_verbs */
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "ib");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "- rc_verbs");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "dev_b");
+
+    /* New TL within ib: type AND component carry over (2 cols). */
+    ucs_table_add_separator_with_merged_cells(table.get(), 2);
+
+    /* network / ib / - ud_verbs */
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "- ud_verbs");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "dev_c");
+
+    /* New dev_type: plain dashed separator. */
+    ucs_table_add_separator(table.get());
+
+    /* intra-node / sysv / - sysv */
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "intra-node");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "sysv");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "- sysv");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "dev_d");
+
+    EXPECT_EQ("+------------+-----------+------------+--------+\n"
+              "| Type       | Component | Transport  | Device |\n"
+              "+------------+-----------+------------+--------+\n"
+              "| network    | tcp       | + tcp      | dev_a  |\n"
+              "|            +-----------+------------+--------+\n"
+              "|            | ib        | - rc_verbs | dev_b  |\n"
+              "|            |           +------------+--------+\n"
+              "|            |           | - ud_verbs | dev_c  |\n"
+              "+------------+-----------+------------+--------+\n"
+              "| intra-node | sysv      | - sysv     | dev_d  |\n"
+              "+------------+-----------+------------+--------+\n",
+              table.render());
+}
+
 
 UCS_TEST_F(test_table, integration_proto_debug_like_layout) {
     /* Three body columns. Header is two cells (right-anchored ep_cfg in
@@ -1065,22 +1172,21 @@ UCS_TEST_F(test_table, centered_cell_with_min_col_widths_respects_minimum) {
               table.render());
 }
 
-UCS_TEST_F(test_table, centered_cell_followed_by_empty_carryover_keeps_corner) {
-    /* CENTER cell with non-empty content above; the leading cell on
-     * the row below is flagged merge_with_above (and is empty). The
-     * separator above the flagged cell renders as a blank carry-over
-     * segment, while the second column renders dashed. CENTER vs LEFT
-     * alignment is orthogonal to the flag-driven carry-over. */
+UCS_TEST_F(test_table, centered_cell_followed_by_merged_cols_keeps_corner) {
+    /* CENTER cell with non-empty content above; the separator below
+     * uses merged_cols=1 to blank the leading column. The leading
+     * cell on the row below is left empty so the visual merge lines
+     * up. CENTER vs LEFT alignment is orthogonal to the
+     * separator-driven carry-over. */
     table_t table(2);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%s", "ctr");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "data1");
-    ucs_table_add_separator(table.get());
+    ucs_table_add_separator_with_merged_cells(table.get(), 1);
 
     row = ucs_table_add_row(table.get());
-    ucs_table_cell_set_merge_with_above(
-            ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT));
+    ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "data2");
 
     EXPECT_EQ("+-----+-------+\n"

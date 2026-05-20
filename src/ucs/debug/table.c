@@ -147,7 +147,8 @@ void ucs_table_cleanup(ucs_table_t *table)
 }
 
 
-void ucs_table_add_separator(ucs_table_t *table)
+void ucs_table_add_separator_with_merged_cells(ucs_table_t *table,
+                                               unsigned merged_cols)
 {
     ucs_table_entry_t *entry;
     unsigned len;
@@ -156,17 +157,28 @@ void ucs_table_add_separator(ucs_table_t *table)
      * overflow the computed widths. Caught in debug builds. */
     ucs_assert(table->widths == NULL);
 
+    ucs_assertv(merged_cols <= table->n_body_cols,
+                "merged_cols=%u exceeds n_body_cols=%u", merged_cols,
+                table->n_body_cols);
+
     /* Reject consecutive separators */
     len = ucs_array_length(&table->entries);
     ucs_assert((len == 0) || (ucs_array_elem(&table->entries, len - 1).kind !=
                               UCS_TABLE_ENTRY_SEPARATOR));
 
-    entry       = ucs_array_append(&table->entries,
-                                   ucs_fatal("failed to grow table entries"));
-    entry->kind = UCS_TABLE_ENTRY_SEPARATOR;
+    entry = ucs_array_append(&table->entries, ucs_fatal("failed to grow table "
+                                                        "entries"));
+    entry->kind        = UCS_TABLE_ENTRY_SEPARATOR;
+    entry->merged_cols = merged_cols;
     /* `cells` is unused for separators; leave the array in zero-init state
      * so cleanup can safely call ucs_array_cleanup_dynamic on it. */
     ucs_array_init_dynamic(&entry->cells);
+}
+
+
+void ucs_table_add_separator(ucs_table_t *table)
+{
+    ucs_table_add_separator_with_merged_cells(table, 0);
 }
 
 
@@ -249,9 +261,8 @@ ucs_table_cell_t *ucs_table_row_add_cell(ucs_table_row_t *row,
      * stable. */
     cell = ucs_array_append(cells, ucs_fatal("table row exceeded body "
                                              "column count"));
-    cell->col_span         = col_span;
-    cell->align            = align;
-    cell->merge_with_above = 0;
+    cell->col_span = col_span;
+    cell->align    = align;
     ucs_string_buffer_init(&cell->text);
     return cell;
 }
@@ -310,20 +321,6 @@ void ucs_table_row_add_cell_fmt(ucs_table_row_t *row, unsigned col_span,
     va_end(ap);
 
     ucs_table_cell_check_content(cell);
-}
-
-
-void ucs_table_cell_set_merge_with_above(ucs_table_cell_t *cell)
-{
-    /* The flag is consumed by the renderer when computing the
-     * separator above the row. Setting it after the table has been
-     * rendered would have no effect (the separator was already
-     * emitted with the old value), so catch the misuse in debug
-     * builds. We can't easily reach the owning table from the cell
-     * pointer here; the check happens implicitly via the building-
-     * state assert on subsequent ucs_table_add_separator / add_row
-     * calls instead. */
-    cell->merge_with_above = 1;
 }
 
 
@@ -565,9 +562,8 @@ static void ucs_table_render_row_entry(const ucs_table_t *table,
  * Render a horizontal separator over the body-column widths. The first
  * `merged_cols` body columns render as blank "|     " segments
  * (the cell below is merged with the cell above); the rest render as
- * "+-----" dashed segments. The very leftmost corner is '|' iff
- * merged_cols > 0; intermediate corners between merged cells
- * stay '+'.
+ * "+-----" dashed segments. Corners between merged segments render as '|'
+ * so the carry-over region is visually continuous.
  */
 static void ucs_table_render_separator(const ucs_table_t *table,
                                        ucs_string_buffer_t *strb,
@@ -589,7 +585,7 @@ static void ucs_table_render_separator(const ucs_table_t *table,
                     "widths[%u]=%d out of range [0, %d]", i, width,
                     UCS_TABLE_DASH_MAX);
 
-        if ((i == 0) && (merged_cols > 0)) {
+        if (i < merged_cols) {
             left_corner = '|';
         } else {
             left_corner = '+';
@@ -604,55 +600,6 @@ static void ucs_table_render_separator(const ucs_table_t *table,
     }
 
     ucs_string_buffer_appendf(strb, "+\n");
-}
-
-
-/* Locate the nearest ROW entry strictly after entry_idx, or NULL if
- * the separator is at (or only followed by) the bottom of the table. */
-static const ucs_table_entry_t *
-ucs_table_row_after(const ucs_table_t *table, unsigned entry_idx)
-{
-    unsigned i;
-
-    for (i = entry_idx + 1; i < ucs_array_length(&table->entries); ++i) {
-        const ucs_table_entry_t *entry = &ucs_array_elem(&table->entries, i);
-        if (entry->kind == UCS_TABLE_ENTRY_ROW) {
-            return entry;
-        }
-    }
-    return NULL;
-}
-
-
-/* Number of leading body columns to render as blank segments in the
- * separator at entry_idx. A column contributes to the carry-over only
- * when the cell directly below has the explicit merge_with_above flag
- * set; the walk stops at the first unflagged leading cell. Cells
- * deeper in the row are ignored even when flagged — the renderer only
- * supports leading carry-over.
- *
- * Returns 0 when the separator has no row below (last entry in the
- * table) or when no leading cell is flagged. */
-static unsigned
-ucs_table_separator_merged_cols(const ucs_table_t *table, unsigned entry_idx)
-{
-    const ucs_table_entry_t *row_below;
-    ucs_table_cell_t *cell;
-    unsigned merged = 0;
-
-    row_below = ucs_table_row_after(table, entry_idx);
-    if (row_below == NULL) {
-        return 0;
-    }
-
-    ucs_array_for_each(cell, &row_below->cells) {
-        if (!cell->merge_with_above) {
-            break;
-        }
-        merged += cell->col_span;
-    }
-
-    return merged;
 }
 
 
@@ -672,8 +619,7 @@ void ucs_table_render(ucs_table_t *table, ucs_string_buffer_t *strb)
             continue;
         }
 
-        ucs_table_render_separator(table, strb,
-                                   ucs_table_separator_merged_cols(table, i));
+        ucs_table_render_separator(table, strb, entry->merged_cols);
     }
 
     /* Bottom frame; skip only when the last entry is already a

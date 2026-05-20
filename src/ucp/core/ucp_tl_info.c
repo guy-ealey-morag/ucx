@@ -83,9 +83,9 @@ ucp_tl_info_cmpt_dev_type(const ucp_tl_info_entry_t *all_rscs,
 /*
  * Emit one data row and toggle the per-(type, cmpt, tl) "first" flags so
  * that subsequent rows in the same group leave those columns blank. The
- * blank leading cells are flagged with merge_with_above so the renderer
- * draws a carry-over separator (blank "|     ") above them instead of
- * a dashed "+---" segment, visually continuing the column from above.
+ * carry-over rendering above an inter-group separator is decided by the
+ * `merged_cols` argument passed when the separator is created (see the
+ * call sites of ucs_table_add_separator_with_merged_cells below).
  */
 static void ucp_tl_info_emit_row(ucs_table_t *table, const char *type_str,
                                  const char *cmpt_str, const char *tl_str,
@@ -94,25 +94,23 @@ static void ucp_tl_info_emit_row(ucs_table_t *table, const char *type_str,
                                  int *printed_any)
 {
     ucs_table_row_t *row = ucs_table_add_row(table);
-    ucs_table_cell_t *cell;
 
-    cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
     if (*first_type) {
-        ucs_table_cell_appendf(cell, "%s", type_str);
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                                   type_str);
     } else {
-        ucs_table_cell_set_merge_with_above(cell);
+        ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
     }
-    cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
     if (*first_cmpt) {
-        ucs_table_cell_appendf(cell, "%s", cmpt_str);
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                                   cmpt_str);
     } else {
-        ucs_table_cell_set_merge_with_above(cell);
+        ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
     }
-    cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
     if (*first_tl) {
-        ucs_table_cell_appendf(cell, "%s", tl_str);
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", tl_str);
     } else {
-        ucs_table_cell_set_merge_with_above(cell);
+        ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
     }
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", dev_str);
 
@@ -129,7 +127,6 @@ void ucp_context_log_tl_info(ucp_context_h context,
     ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
     ucs_table_t table;
     ucs_table_row_t *row;
-    ucs_table_cell_t *cell;
     ucp_rsc_index_t cmpt_idx;
     uct_device_type_t dev_type, cmpt_dev_type;
     unsigned i, j;
@@ -193,12 +190,17 @@ void ucp_context_log_tl_info(ucp_context_h context,
                     continue;
                 }
 
-                if (first_cmpt && printed_any) {
-                    /* The next row's leading cells (type / cmpt) are
-                     * flagged merge_with_above when !first_type /
-                     * !first_cmpt, so this separator renders with a
-                     * carry-over over those columns. */
-                    ucs_table_add_separator(&table);
+                if (printed_any) {
+                    /* Carry-over depth on the separator above the
+                     * row about to be emitted:
+                     *  - 2 cols (type + component) when joining a
+                     *    new TL within the same component.
+                     *  - 1 col (type only) when joining a new
+                     *    component within the same dev_type.
+                     *  - 0 (plain dashed) when starting a brand-new
+                     *    dev_type. */
+                    ucs_table_add_separator_with_merged_cells(
+                            &table, !first_cmpt ? 2 : (first_type ? 0 : 1));
                 }
 
                 tl_enabled = 0;
@@ -295,13 +297,13 @@ void ucp_context_log_tl_info(ucp_context_h context,
                 ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
                 first_unavail = 0;
             } else {
-                /* "type" column on the row below stays empty and is
-                 * flagged merge_with_above, so the renderer emits a
-                 * carry-over separator above it. */
-                ucs_table_add_separator(&table);
-                row  = ucs_table_add_row(&table);
-                cell = ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
-                ucs_table_cell_set_merge_with_above(cell);
+                /* "type" column on the row below stays empty; carry
+                 * it over via the separator's merged_cols=1 so the
+                 * renderer emits a blank "|     " segment above the
+                 * empty type cell instead of a dashed "+---". */
+                ucs_table_add_separator_with_merged_cells(&table, 1);
+                row = ucs_table_add_row(&table);
+                ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
                 ucs_table_row_add_cell_fmt(
                         row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                         context->tl_cmpts[cmpt_idx].attr.name);

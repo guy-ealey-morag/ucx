@@ -47,14 +47,14 @@ BEGIN_C_DECLS
  *     separators at the top and bottom of the table are inserted
  *     automatically by render().
  *
- *   - Carry-over: opt-in per cell via ucs_table_cell_set_merge_with_above.
- *     When the row immediately following a separator has one or more
- *     LEADING cells flagged this way, those positions render as blank
+ *   - Carry-over: opt-in per separator via the `merged_cols` argument to
+ *     ucs_table_add_separator_with_merged_cells(). When non-zero, the
+ *     leading `merged_cols` body columns of that separator render as blank
  *     "|     |" segments rather than dashes, and the leftmost corner is
  *     '|' instead of '+'. This is used to visually continue a column from
- *     the row above the separator into the row below. The flag has no
- *     effect on the cell's own row rendering, and is ignored when set on
- *     non-leading cells.
+ *     the row above the separator into the row below. The remaining body
+ *     columns render as the regular dashed segments. The plain
+ *     ucs_table_add_separator() helper is shorthand for `merged_cols == 0`.
  *
  * All cell content is owned by the table; ucs_table_cleanup() releases
  * everything.
@@ -129,18 +129,10 @@ typedef enum {
  * access it directly. For LEFT_RIGHT cells the buffer must contain
  * exactly one '\t' (the separator between the left- and right-anchored
  * portions) by the time the table is rendered.
- *
- * `merge_with_above` is an opt-in flag set via
- * ucs_table_cell_set_merge_with_above(). When set on a LEADING cell of
- * a row, the separator immediately above that cell renders as a blank
- * carry-over segment over the cell's column range, instead of the
- * default "+----+" dashed segment. The flag has no effect on the cell's
- * own row content rendering, and is ignored on non-leading cells.
  */
 struct ucs_table_cell {
     unsigned            col_span;
     ucs_table_align_t   align;
-    unsigned            merge_with_above : 1;
     ucs_string_buffer_t text;
 };
 
@@ -159,9 +151,13 @@ UCS_ARRAY_DECLARE_TYPE(ucs_table_cells_t, unsigned, ucs_table_cell_t);
 
 
 /* Internal type: one entry in the table is either a row (a vector of
- * cells) or a separator marker. */
+ * cells) or a separator marker. For separator entries, `merged_cols`
+ * is the number of leading body columns to render as blank carry-over
+ * segments instead of dashed segments (zero means a regular dashed
+ * separator). The `cells` array is unused for separator entries. */
 typedef struct {
     ucs_table_entry_kind_t kind;
+    unsigned               merged_cols;
     ucs_table_cells_t      cells;
 } ucs_table_entry_t;
 
@@ -260,15 +256,32 @@ void ucs_table_set_min_col_widths(ucs_table_t *table, const int *min_widths);
 
 
 /*
- * Append a manual horizontal separator between rows. The renderer decides
- * the separator's exact appearance from the row directly below: each
- * leading cell flagged with ucs_table_cell_set_merge_with_above() renders
- * as a blank carry-over segment "|     " (and shifts the leftmost corner
- * from '+' to '|'); the rest of the segments render as dashed "+----".
- * Frame separators at the very top and bottom of the table are inserted
- * automatically by render(); do not add them explicitly.
+ * Append a plain horizontal separator between rows. All body columns
+ * render as the regular dashed "+----" segments. Equivalent to
+ * ucs_table_add_separator_with_merged_cells(table, 0).
+ *
+ * Frame separators at the very top and bottom of the table are
+ * inserted automatically by render(); do not add them explicitly.
  */
 void ucs_table_add_separator(ucs_table_t *table);
+
+
+/*
+ * Append a horizontal separator with carry-over over the leading
+ * `merged_cols` body columns. Those positions render as blank
+ * "|     " segments (shifting the leftmost corner from '+' to '|');
+ * the remaining body columns render as the regular dashed "+----"
+ * segments.
+ *
+ * `merged_cols` must be <= the table's n_body_cols. Pass
+ * `merged_cols == 0` to add a plain dashed separator (or use the
+ * shorter ucs_table_add_separator()).
+ *
+ * Frame separators at the very top and bottom of the table are
+ * inserted automatically by render(); do not add them explicitly.
+ */
+void ucs_table_add_separator_with_merged_cells(ucs_table_t *table,
+                                               unsigned merged_cols);
 
 
 /*
@@ -329,27 +342,13 @@ void ucs_table_cell_appendf(ucs_table_cell_t *cell, const char *fmt, ...)
 
 
 /*
- * Mark this cell so the separator IMMEDIATELY ABOVE it renders as a
- * blank carry-over segment across the cell's column range, instead of
- * the default "+----+" dashed segment. The cell's own row still
- * renders its content normally — the flag only affects the separator
- * above. Only LEADING flagged cells in a row contribute to carry-over;
- * a flag on a non-leading cell is ignored by the renderer.
- *
- * Must be called in the "building" state (before the table has been
- * rendered); asserts otherwise.
- */
-void ucs_table_cell_set_merge_with_above(ucs_table_cell_t *cell);
-
-
-/*
  * Render the buffered table into strb. Frame separators are prepended
  * and appended automatically. Body column widths are derived from the
  * maximum cell content per column; merged cells expand the rightmost
  * body column they span if their content does not fit in the existing
  * widths. Separator corner and carry-over rendering are derived from
- * the merge_with_above flag on the leading cells of the row that
- * follows each separator.
+ * the `merged_cols` argument passed at separator creation time (see
+ * ucs_table_add_separator_with_merged_cells()).
  */
 void ucs_table_render(ucs_table_t *table, ucs_string_buffer_t *strb);
 
