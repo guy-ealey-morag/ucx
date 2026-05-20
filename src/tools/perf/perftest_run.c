@@ -228,16 +228,16 @@ static void perftest_add_meta_rows(ucs_table_t *table,
 static void perftest_results_table_open(struct perftest_context *ctx,
                                         const test_type_t *test)
 {
-    const int is_final    = !!(ctx->flags & TEST_FLAG_PRINT_FINAL);
-    const int print_test  = !!(ctx->flags & TEST_FLAG_PRINT_TEST);
-    const int print_csv   = !!(ctx->flags & TEST_FLAG_PRINT_CSV);
-    const int has_meta    = print_test && (test != NULL) &&
-                            ((test->api == UCX_PERF_API_UCT) ||
-                             (test->api == UCX_PERF_API_UCP));
-    const int has_headers = (ctx->flags & TEST_FLAG_PRINT_RESULTS) &&
-                            !print_csv;
+    const int is_final         = !!(ctx->flags & TEST_FLAG_PRINT_FINAL);
+    const int print_test       = !!(ctx->flags & TEST_FLAG_PRINT_TEST);
+    const int print_csv        = !!(ctx->flags & TEST_FLAG_PRINT_CSV);
+    const int has_meta         = print_test && (test != NULL) &&
+                                 ((test->api == UCX_PERF_API_UCT) ||
+                                  (test->api == UCX_PERF_API_UCP));
+    const int has_headers      = (ctx->flags & TEST_FLAG_PRINT_RESULTS) &&
+                                 !print_csv;
+    ucs_table_config_t cfg     = {};
     int min_widths[PERFTEST_RESULTS_N_COLS];
-    unsigned n_body_cols;
     const char *overhead_lat_str;
     ucs_table_row_t *row;
     unsigned i;
@@ -246,8 +246,7 @@ static void perftest_results_table_open(struct perftest_context *ctx,
         return;
     }
 
-    n_body_cols = has_headers ? PERFTEST_RESULTS_N_COLS : 1;
-    ucs_table_init(&ctx->results_table, n_body_cols);
+    cfg.n_body_cols = has_headers ? PERFTEST_RESULTS_N_COLS : 1;
 
     if (has_headers) {
         memcpy(min_widths, results_col_widths, sizeof(min_widths));
@@ -255,13 +254,16 @@ static void perftest_results_table_open(struct perftest_context *ctx,
             min_widths[0] = ucs_max(min_widths[0],
                                     (int)ctx->max_test_name_width);
         }
-        ucs_table_set_min_col_widths(&ctx->results_table, min_widths);
+        cfg.min_widths = min_widths;
     }
-    /* CSV+meta and server-side meta-only paths leave min_widths unset;
-     * the 1-col meta box renders at content-derived width (compact). */
+
+    /* CSV+meta and server-side meta-only paths leave cfg.min_widths
+     * unset; the 1-col meta box renders at content-derived width
+     * (compact). */
+    ucs_table_init(&ctx->results_table, &cfg);
 
     if (has_meta) {
-        perftest_add_meta_rows(&ctx->results_table, ctx, test, n_body_cols);
+        perftest_add_meta_rows(&ctx->results_table, ctx, test, cfg.n_body_cols);
     }
 
     if (has_headers) {

@@ -86,9 +86,9 @@ BEGIN_C_DECLS
  *
  *   Streamed rows alone cannot guarantee they fit in their columns
  *   (the table did not see their content when computing widths). The
- *   caller should call ucs_table_set_min_col_widths() before render
- *   to lock in column widths that match the printf widths it will use
- *   to format streamed-row cells.
+ *   caller should set min_widths in the ucs_table_config_t passed to
+ *   ucs_table_init() to lock in column widths that match the printf
+ *   widths it will use to format streamed-row cells.
  */
 
 
@@ -154,33 +154,58 @@ UCS_ARRAY_DECLARE_TYPE(ucs_table_row_handles_t, unsigned, ucs_table_row_t*);
 
 
 /*
+ * Configuration for a buffered table. Pass to ucs_table_init() to set
+ * up the table. All fields except n_body_cols default safely to zero,
+ * so callers can zero-initialize (e.g. with `{0}` or designated
+ * initializers) and set only the fields they need.
+ */
+typedef struct ucs_table_config {
+    /* Number of body columns. Every row added to the table must contain
+     * cells whose col_spans sum exactly to this value. */
+    unsigned   n_body_cols;
+    /* Prepended to every rendered line (both body rows and separator
+     * lines). NULL means no prefix. The table stores the pointer as-is
+     * and does not copy or free it; the caller must keep the string
+     * alive until the table is rendered or cleaned up.
+     *
+     * Example: set the prefix to "# " to render the entire table as a
+     * sequence of comment lines. */
+    const char *row_prefix;
+    /* Per-body-column minimum widths, or NULL when no minimum is
+     * required. When set, ucs_table_compute_widths() initializes each
+     * column to min_widths[i] before measuring content, guaranteeing
+     * column widths >= the caller's minimums. Useful when populating
+     * streamed rows with fixed-width printf formats that must fit the
+     * table columns.
+     *
+     * The array is copied by ucs_table_init(); the caller does not
+     * need to keep it alive afterwards. Must point to at least
+     * n_body_cols ints when not NULL. */
+    const int  *min_widths;
+    /* When non-zero, ucs_table_render() expands every body column to
+     * the maximum computed width so all columns render at the same
+     * width. Default: 0 (per-column widths). */
+    int        equal_widths;
+} ucs_table_config_t;
+
+
+/*
  * Buffered ASCII table. Callers should treat this as opaque: declare a
  * local of this type, pass its address to ucs_table_init(), and
  * manipulate it through the API functions below.
  */
 typedef struct ucs_table {
-    unsigned                n_body_cols;
+    /* Frozen at ucs_table_init() time. config.min_widths is replaced
+     * with a table-owned heap copy of the caller's array (or kept as
+     * NULL); all other fields are copied verbatim from the caller. */
+    ucs_table_config_t      config;
     ucs_table_entries_t     entries;
     ucs_table_row_handles_t row_handles;
-    /* Prepended to every rendered line (both body rows and separators).
-     * NULL means no prefix. The table does not own the string; the
-     * caller must keep it alive until render/cleanup. */
-    const char              *row_prefix;
     /* Per-body-column widths. Lazily allocated on the first
      * ucs_table_render() / ucs_table_print() call and kept alive on
      * the table until ucs_table_cleanup(). NULL while in the
      * "building" state, non-NULL once the table has been rendered. */
     int                     *widths;
-    /* Heap-copied minimum per-body-column widths, or NULL. When set,
-     * ucs_table_compute_widths() initializes each column to
-     * min_widths[i] before measuring content, guaranteeing column
-     * widths >= the caller's mins. Owned by the table, freed in
-     * ucs_table_cleanup(). */
-    int                     *min_widths;
-    /* When non-zero, ucs_table_render() normalizes every body-column
-     * width to the maximum computed width, producing uniformly-wide
-     * columns. Default: 0 (per-column widths). */
-    int                     equal_widths;
     /* Number of currently-live stream rows allocated against this
      * table via ucs_table_stream_row_create(). Asserted to be zero
      * by ucs_table_cleanup() to catch caller leaks. */
@@ -189,11 +214,13 @@ typedef struct ucs_table {
 
 
 /*
- * Initialize a buffered table with n_body_cols body columns. Every row
- * subsequently added to this table must contain cells whose col_spans sum
- * exactly to n_body_cols.
+ * Initialize a buffered table from the given configuration. `config`
+ * must be non-NULL; see ucs_table_config_t for the per-field
+ * semantics and defaults. The config is copied into the table, and
+ * config->min_widths (when non-NULL) is deep-copied into table-owned
+ * heap storage.
  */
-void ucs_table_init(ucs_table_t *table, unsigned n_body_cols);
+void ucs_table_init(ucs_table_t *table, const ucs_table_config_t *config);
 
 
 /*
@@ -201,45 +228,6 @@ void ucs_table_init(ucs_table_t *table, unsigned n_body_cols);
  * buffers). After this call the table is unusable.
  */
 void ucs_table_cleanup(ucs_table_t *table);
-
-
-/*
- * Set a string that will be prepended to every line emitted by
- * ucs_table_render(), including both body rows and separator lines.
- * Pass NULL to disable the prefix. The table stores the pointer as-is
- * and does not copy or free it; the caller must keep the string alive
- * until the table is rendered or cleaned up.
- *
- * Example: set the prefix to "# " to render the entire table as a
- * sequence of comment lines.
- */
-void ucs_table_set_row_prefix(ucs_table_t *table, const char *prefix);
-
-
-/*
- * Enable or disable equal-width rendering. When `equal_widths` is
- * non-zero, ucs_table_render() expands every body column to the
- * maximum computed width so all columns render at the same width.
- * Default: disabled.
- */
-void ucs_table_set_equal_widths(ucs_table_t *table, int equal_widths);
-
-
-/*
- * Lock per-body-column minimum widths. ucs_table_compute_widths()
- * starts each column at min_widths[i] (or 0 when unset) before
- * measuring content, so the resulting widths are >= the caller's
- * minimums. Useful when the caller plans to populate streamed rows
- * with fixed-width printf formats and needs the table columns to
- * accommodate them.
- *
- * The widths array is copied; the caller does not need to keep it
- * alive. Pass NULL to clear any previously-set minimums.
- *
- * Must be called in the "building" state (before ucs_table_render() /
- * ucs_table_print()); asserts when the widths are already alive.
- */
-void ucs_table_set_min_col_widths(ucs_table_t *table, const int *min_widths);
 
 
 /*
@@ -267,8 +255,8 @@ void ucs_table_add_separator(ucs_table_t *table);
  * Frame separators at the very top and bottom of the table are
  * inserted automatically by render(); do not add them explicitly.
  */
-void ucs_table_add_separator_with_merged_cells(ucs_table_t *table,
-                                               unsigned merged_cols);
+void ucs_table_add_separator_with_merged_cols(ucs_table_t *table,
+                                              unsigned merged_cols);
 
 
 /*

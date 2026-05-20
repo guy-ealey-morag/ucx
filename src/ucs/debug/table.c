@@ -61,53 +61,31 @@ struct ucs_table_row {
 };
 
 
-void ucs_table_init(ucs_table_t *table, unsigned n_body_cols)
+void ucs_table_init(ucs_table_t *table, const ucs_table_config_t *config)
 {
-    table->n_body_cols   = n_body_cols;
-    table->row_prefix    = NULL;
+    int *owned_min_widths;
+
+    table->config        = *config;
     table->widths        = NULL;
-    table->min_widths    = NULL;
-    table->equal_widths  = 0;
     table->n_stream_rows = 0;
     ucs_array_init_dynamic(&table->entries);
     ucs_array_init_dynamic(&table->row_handles);
-}
 
-
-void ucs_table_set_row_prefix(ucs_table_t *table, const char *prefix)
-{
-    table->row_prefix = prefix;
-}
-
-
-void ucs_table_set_equal_widths(ucs_table_t *table, int equal_widths)
-{
-    table->equal_widths = equal_widths;
-}
-
-
-void ucs_table_set_min_col_widths(ucs_table_t *table, const int *min_widths)
-{
-    /* Setting min widths after the table has been rendered would have
-     * no effect (widths are already computed) and would leave the user
-     * with a false sense of layout. Catch this in debug builds. */
-    ucs_assert(table->widths == NULL);
-
-    ucs_free(table->min_widths);
-    table->min_widths = NULL;
-
-    if (min_widths == NULL) {
+    if (config->min_widths == NULL) {
         return;
     }
 
-    table->min_widths = ucs_malloc(table->n_body_cols *
-                                           sizeof(*table->min_widths),
-                                   "ucs_table_min_widths");
-    if (table->min_widths == NULL) {
+    /* Deep-copy the caller's min_widths array into table-owned storage
+     * so the caller's array can be transient (stack-allocated). */
+    owned_min_widths = ucs_malloc(config->n_body_cols *
+                                          sizeof(*owned_min_widths),
+                                  "ucs_table_min_widths");
+    if (owned_min_widths == NULL) {
         ucs_fatal("failed to allocate table min widths");
     }
-    memcpy(table->min_widths, min_widths,
-           table->n_body_cols * sizeof(*table->min_widths));
+    memcpy(owned_min_widths, config->min_widths,
+           config->n_body_cols * sizeof(*owned_min_widths));
+    table->config.min_widths = owned_min_widths;
 }
 
 
@@ -142,29 +120,26 @@ void ucs_table_cleanup(ucs_table_t *table)
     ucs_free(table->widths);
     table->widths = NULL;
 
-    ucs_free(table->min_widths);
-    table->min_widths = NULL;
+    /* config.min_widths was allocated by ucs_table_init() when the
+     * caller supplied min_widths; freeing NULL is a no-op. The cast
+     * drops the public-API const since the storage is table-owned. */
+    ucs_free((void*)table->config.min_widths);
+    table->config.min_widths = NULL;
 }
 
 
-void ucs_table_add_separator_with_merged_cells(ucs_table_t *table,
-                                               unsigned merged_cols)
+void ucs_table_add_separator_with_merged_cols(ucs_table_t *table,
+                                              unsigned merged_cols)
 {
     ucs_table_entry_t *entry;
-    unsigned len;
 
     /* Adding entries after the table has been rendered would silently
      * overflow the computed widths. Caught in debug builds. */
     ucs_assert(table->widths == NULL);
 
-    ucs_assertv(merged_cols <= table->n_body_cols,
+    ucs_assertv(merged_cols <= table->config.n_body_cols,
                 "merged_cols=%u exceeds n_body_cols=%u", merged_cols,
-                table->n_body_cols);
-
-    /* Reject consecutive separators */
-    len = ucs_array_length(&table->entries);
-    ucs_assert((len == 0) || (ucs_array_elem(&table->entries, len - 1).kind !=
-                              UCS_TABLE_ENTRY_SEPARATOR));
+                table->config.n_body_cols);
 
     entry = ucs_array_append(&table->entries, ucs_fatal("failed to grow table "
                                                         "entries"));
@@ -178,7 +153,7 @@ void ucs_table_add_separator_with_merged_cells(ucs_table_t *table,
 
 void ucs_table_add_separator(ucs_table_t *table)
 {
-    ucs_table_add_separator_with_merged_cells(table, 0);
+    ucs_table_add_separator_with_merged_cols(table, 0);
 }
 
 
@@ -205,7 +180,7 @@ ucs_table_row_t *ucs_table_add_row(ucs_table_t *table)
     /* Pre-reserve cells to n_body_cols so subsequent add_cell calls do not
      * reallocate the cells buffer. Cell pointers handed out by add_cell
      * then remain valid for the lifetime of the table. */
-    status = ucs_array_reserve(&entry->cells, table->n_body_cols);
+    status = ucs_array_reserve(&entry->cells, table->config.n_body_cols);
     if (status != UCS_OK) {
         ucs_fatal("failed to reserve table row cells");
     }
@@ -321,14 +296,15 @@ static unsigned ucs_table_cell_content_len(ucs_table_cell_t *cell)
  * rightmost spanned column when they happen to be added before the body
  * rows that would naturally establish the column widths.
  *
- * Each column starts at table->min_widths[i] (or 0 when unset) so the
- * caller can lock in a lower bound for stream-row content the table
- * does not see during measurement. */
+ * Each column starts at table->config.min_widths[i] (or 0 when unset)
+ * so the caller can lock in a lower bound for stream-row content the
+ * table does not see during measurement. */
 /* Allocate and populate table->widths if it has not been computed
  * already. Idempotent — repeated calls are a no-op. Widths live on the
  * table from the first call until ucs_table_cleanup(). */
 static void ucs_table_compute_widths(ucs_table_t *table)
 {
+    const int *min_widths = table->config.min_widths;
     ucs_table_entry_t *entry;
     ucs_table_cell_t *cell;
     unsigned i, body_col, content_len;
@@ -339,14 +315,14 @@ static void ucs_table_compute_widths(ucs_table_t *table)
         return;
     }
 
-    widths = ucs_malloc(table->n_body_cols * sizeof(*widths),
+    widths = ucs_malloc(table->config.n_body_cols * sizeof(*widths),
                         "ucs_table_widths");
     if (widths == NULL) {
         ucs_fatal("failed to allocate table widths");
     }
 
-    for (i = 0; i < table->n_body_cols; ++i) {
-        widths[i] = (table->min_widths != NULL) ? table->min_widths[i] : 0;
+    for (i = 0; i < table->config.n_body_cols; ++i) {
+        widths[i] = (min_widths != NULL) ? min_widths[i] : 0;
     }
 
     /* Pass 1: col_span == 1 cells only. */
@@ -390,12 +366,12 @@ static void ucs_table_compute_widths(ucs_table_t *table)
     /* Equal-width pass: widen every body column to the maximum so all
      * columns render at the same width. Runs after pass 2 so it only
      * ever widens columns and never invalidates merged-cell fits. */
-    if (table->equal_widths) {
+    if (table->config.equal_widths) {
         int max_width = 0;
-        for (i = 0; i < table->n_body_cols; ++i) {
+        for (i = 0; i < table->config.n_body_cols; ++i) {
             max_width = ucs_max(max_width, widths[i]);
         }
-        for (i = 0; i < table->n_body_cols; ++i) {
+        for (i = 0; i < table->config.n_body_cols; ++i) {
             widths[i] = max_width;
         }
     }
@@ -454,8 +430,8 @@ static void ucs_table_render_cells(const ucs_table_t *table,
 
     ucs_assert(table->widths != NULL);
 
-    if (table->row_prefix != NULL) {
-        ucs_string_buffer_appendf(strb, "%s", table->row_prefix);
+    if (table->config.row_prefix != NULL) {
+        ucs_string_buffer_appendf(strb, "%s", table->config.row_prefix);
     }
 
     ucs_array_for_each(cell, cells) {
@@ -486,11 +462,11 @@ static void ucs_table_render_separator(const ucs_table_t *table,
 
     ucs_assert(table->widths != NULL);
 
-    if (table->row_prefix != NULL) {
-        ucs_string_buffer_appendf(strb, "%s", table->row_prefix);
+    if (table->config.row_prefix != NULL) {
+        ucs_string_buffer_appendf(strb, "%s", table->config.row_prefix);
     }
 
-    for (i = 0; i < table->n_body_cols; ++i) {
+    for (i = 0; i < table->config.n_body_cols; ++i) {
         width = table->widths[i];
         ucs_assertv((width >= 0) && (width <= UCS_TABLE_DASH_MAX),
                     "widths[%u]=%d out of range [0, %d]", i, width,
@@ -579,7 +555,7 @@ ucs_table_row_t *ucs_table_stream_row_create(ucs_table_t *table)
 
     /* Pre-reserve to n_body_cols so add_cell calls never reallocate
      * the cells buffer (cell pointers stay stable). */
-    status = ucs_array_reserve(&row->u.cells, table->n_body_cols);
+    status = ucs_array_reserve(&row->u.cells, table->config.n_body_cols);
     if (status != UCS_OK) {
         ucs_fatal("failed to reserve stream row cells");
     }

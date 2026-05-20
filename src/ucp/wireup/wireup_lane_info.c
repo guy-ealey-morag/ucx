@@ -154,8 +154,11 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
                              const ucp_ep_config_key_t *key,
                              ucp_worker_cfg_index_t cfg_index)
 {
-    ucp_context_h context    = worker->context;
-    ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
+    ucp_context_h context         = worker->context;
+    ucs_string_buffer_t strb      = UCS_STRING_BUFFER_INITIALIZER;
+    const ucs_table_config_t tcfg = {
+        .n_body_cols = UCP_EP_LANE_INFO_NUM_COLS
+    };
     ucs_table_t table;
     ucs_table_row_t *row;
     ucp_lane_index_t lane, j;
@@ -187,7 +190,7 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
                  cfg_index, ep_type);
     }
 
-    ucs_table_init(&table, UCP_EP_LANE_INFO_NUM_COLS);
+    ucs_table_init(&table, &tcfg);
 
     /* Title spans all body columns. */
     row = ucs_table_add_row(&table);

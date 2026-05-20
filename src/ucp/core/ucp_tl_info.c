@@ -124,7 +124,10 @@ void ucp_context_log_tl_info(ucp_context_h context,
                              const ucp_tl_info_entry_t *all_rscs,
                              unsigned num_all_rscs)
 {
-    ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
+    ucs_string_buffer_t strb      = UCS_STRING_BUFFER_INITIALIZER;
+    const ucs_table_config_t tcfg = {
+        .n_body_cols = UCP_TL_INFO_NUM_COLS
+    };
     ucs_table_t table;
     ucs_table_row_t *row;
     ucp_rsc_index_t cmpt_idx;
@@ -142,7 +145,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
         return;
     }
 
-    ucs_table_init(&table, UCP_TL_INFO_NUM_COLS);
+    ucs_table_init(&table, &tcfg);
 
     if (!ucs_string_is_empty(context->name)) {
         snprintf(title_buf, sizeof(title_buf),
@@ -199,7 +202,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
                      *    component within the same dev_type.
                      *  - 0 (plain dashed) when starting a brand-new
                      *    dev_type. */
-                    ucs_table_add_separator_with_merged_cells(
+                    ucs_table_add_separator_with_merged_cols(
                             &table, !first_cmpt ? 2 : (first_type ? 0 : 1));
                 }
 
@@ -301,7 +304,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
                  * it over via the separator's merged_cols=1 so the
                  * renderer emits a blank "|     " segment above the
                  * empty type cell instead of a dashed "+---". */
-                ucs_table_add_separator_with_merged_cells(&table, 1);
+                ucs_table_add_separator_with_merged_cols(&table, 1);
                 row = ucs_table_add_row(&table);
                 ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
                 ucs_table_row_add_cell_fmt(

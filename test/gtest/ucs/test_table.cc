@@ -23,7 +23,14 @@ protected:
     public:
         explicit table_t(unsigned n_body_cols)
         {
-            ucs_table_init(&m_table, n_body_cols);
+            ucs_table_config_t cfg = {};
+            cfg.n_body_cols        = n_body_cols;
+            ucs_table_init(&m_table, &cfg);
+        }
+
+        explicit table_t(const ucs_table_config_t &cfg)
+        {
+            ucs_table_init(&m_table, &cfg);
         }
 
         ~table_t()
@@ -177,7 +184,7 @@ UCS_TEST_F(test_table,
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "type");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "data1");
-    ucs_table_add_separator_with_merged_cells(table.get(), 1);
+    ucs_table_add_separator_with_merged_cols(table.get(), 1);
 
     row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
@@ -238,14 +245,16 @@ UCS_TEST_F(test_table, separator_with_merged_cols_one_blanks_first_column) {
      * segment render as a blank "|     " carry-over and shifts the
      * leftmost corner from '+' to '|'. The remaining segments stay
      * dashed. */
-    table_t table(2);
     const int min_widths[2] = {3, 3};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 2;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "y");
-    ucs_table_add_separator_with_merged_cells(table.get(), 1);
+    ucs_table_add_separator_with_merged_cols(table.get(), 1);
 
     row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
@@ -264,9 +273,11 @@ UCS_TEST_F(test_table,
     /* Regression: an empty leading cell on the row below must NOT
      * influence the separator. Carry-over is decided purely by the
      * separator's merged_cols value. */
-    table_t table(2);
     const int min_widths[2] = {3, 3};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 2;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
@@ -290,15 +301,17 @@ UCS_TEST_F(test_table, separator_with_merged_cols_only_blanks_leading_columns) {
      * column; the trailing two columns render as dashed segments
      * regardless of what content (or lack thereof) the row below
      * has in those columns. */
-    table_t table(3);
     const int min_widths[3] = {3, 3, 3};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 3;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "c");
-    ucs_table_add_separator_with_merged_cells(table.get(), 1);
+    ucs_table_add_separator_with_merged_cols(table.get(), 1);
 
     row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
@@ -321,14 +334,16 @@ UCS_TEST_F(test_table,
      * segment closes with a regular '+'. Mirrors the canonical use
      * case of a leading "category" cell that spans two body
      * columns. */
-    table_t table(3);
     const int min_widths[3] = {3, 3, 3};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 3;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_LEFT, "%s", "ab");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
-    ucs_table_add_separator_with_merged_cells(table.get(), 2);
+    ucs_table_add_separator_with_merged_cols(table.get(), 2);
 
     row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell(row, 2, UCS_TABLE_ALIGN_LEFT);
@@ -349,9 +364,11 @@ UCS_TEST_F(test_table,
      * retroactively change how that separator renders. Two
      * separators with different merged_cols values appear in the
      * same table and render independently. */
-    table_t table(2);
     const int min_widths[2] = {3, 3};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 2;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
@@ -359,7 +376,7 @@ UCS_TEST_F(test_table,
 
     /* First separator: merged_cols=1 even though the row below has
      * non-empty leading cells. */
-    ucs_table_add_separator_with_merged_cells(table.get(), 1);
+    ucs_table_add_separator_with_merged_cols(table.get(), 1);
 
     row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "c");
@@ -491,7 +508,7 @@ UCS_TEST_F(test_table, integration_tl_info_like_layout) {
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "dev_a");
 
     /* New component within network: type carries over (1 col). */
-    ucs_table_add_separator_with_merged_cells(table.get(), 1);
+    ucs_table_add_separator_with_merged_cols(table.get(), 1);
 
     /* network / ib / - rc_verbs */
     row = ucs_table_add_row(table.get());
@@ -502,7 +519,7 @@ UCS_TEST_F(test_table, integration_tl_info_like_layout) {
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "dev_b");
 
     /* New TL within ib: type AND component carry over (2 cols). */
-    ucs_table_add_separator_with_merged_cells(table.get(), 2);
+    ucs_table_add_separator_with_merged_cols(table.get(), 2);
 
     /* network / ib / - ud_verbs */
     row = ucs_table_add_row(table.get());
@@ -556,8 +573,10 @@ UCS_TEST_F(test_table, row_prefix_default_is_null_no_prefix) {
 UCS_TEST_F(test_table, row_prefix_prepended_to_every_line) {
     /* "# " is prepended to body rows AND to the top/bottom frame
      * separators, so the entire table reads as a comment block. */
-    table_t table(1);
-    ucs_table_set_row_prefix(table.get(), "# ");
+    ucs_table_config_t cfg = {};
+    cfg.n_body_cols        = 1;
+    cfg.row_prefix         = "# ";
+    table_t table(cfg);
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "abc");
 
@@ -570,8 +589,10 @@ UCS_TEST_F(test_table, row_prefix_prepended_to_every_line) {
 UCS_TEST_F(test_table, row_prefix_prepended_to_inner_separator) {
     /* Verify an explicit add_separator line between rows also receives
      * the prefix. */
-    table_t table(1);
-    ucs_table_set_row_prefix(table.get(), "# ");
+    ucs_table_config_t cfg = {};
+    cfg.n_body_cols        = 1;
+    cfg.row_prefix         = "# ";
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
@@ -590,8 +611,10 @@ UCS_TEST_F(test_table, row_prefix_prepended_to_inner_separator) {
 UCS_TEST_F(test_table, row_prefix_empty_string_renders_unchanged) {
     /* Empty-string prefix is a no-op but must not crash and must
      * produce output byte-identical to the no-prefix case. */
-    table_t table(1);
-    ucs_table_set_row_prefix(table.get(), "");
+    ucs_table_config_t cfg = {};
+    cfg.n_body_cols        = 1;
+    cfg.row_prefix         = "";
+    table_t table(cfg);
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "abc");
 
@@ -600,34 +623,13 @@ UCS_TEST_F(test_table, row_prefix_empty_string_renders_unchanged) {
               "+-----+\n",
               table.render());
 }
-
-UCS_TEST_F(test_table, row_prefix_can_be_cleared_back_to_null) {
-    /* After a non-NULL prefix is set and then cleared, subsequent
-     * renders must drop the prefix on every line. */
-    table_t table(1);
-    auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "abc");
-
-    ucs_table_set_row_prefix(table.get(), "# ");
-    EXPECT_EQ("# +-----+\n"
-              "# | abc |\n"
-              "# +-----+\n",
-              table.render());
-
-    ucs_table_set_row_prefix(table.get(), NULL);
-    EXPECT_EQ("+-----+\n"
-              "| abc |\n"
-              "+-----+\n",
-              table.render());
-}
-
 
 /* Group J: equal_widths */
 
 UCS_TEST_F(test_table, equal_widths_default_disabled_uses_per_column_widths) {
-    /* Without ucs_table_set_equal_widths, each body column keeps its
-     * own per-column width. Regression guard against accidental
-     * normalization. */
+    /* With equal_widths left at its default of 0, each body column
+     * keeps its own per-column width. Regression guard against
+     * accidental normalization. */
     table_t table(3);
 
     auto *row = ucs_table_add_row(table.get());
@@ -645,8 +647,10 @@ UCS_TEST_F(test_table, equal_widths_normalizes_all_columns_to_max) {
     /* Per-column widths from the row are {1, 6, 2}. With equal_widths
      * enabled, render() picks max=6 and widens every column to 6 so
      * the short cells pad out to match the widest one. */
-    table_t table(3);
-    ucs_table_set_equal_widths(table.get(), 1);
+    ucs_table_config_t cfg = {};
+    cfg.n_body_cols        = 3;
+    cfg.equal_widths       = 1;
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
@@ -664,8 +668,10 @@ UCS_TEST_F(test_table, equal_widths_with_col_span_propagates_post_expansion) {
      * widths[1] to absorb the merged 23-char header => widths become
      * {2, 18}. Equal-widths then normalizes both to 18, so the second
      * row's two cells render at the wider column width. */
-    table_t table(2);
-    ucs_table_set_equal_widths(table.get(), 1);
+    ucs_table_config_t cfg = {};
+    cfg.n_body_cols        = 2;
+    cfg.equal_widths       = 1;
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_LEFT, "%s",
@@ -688,10 +694,11 @@ UCS_TEST_F(test_table, equal_widths_with_col_span_propagates_post_expansion) {
 UCS_TEST_F(test_table, set_min_col_widths_widens_narrow_columns) {
     /* min_widths {10, 10} forces each column to be at least 10 chars,
      * even though the actual content is much shorter. */
-    table_t table(2);
-
     const int min_widths[2] = {10, 10};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 2;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
@@ -707,10 +714,11 @@ UCS_TEST_F(test_table,
            set_min_col_widths_does_not_shrink_columns_wider_than_min) {
     /* When the row's content exceeds the minimum, the computed column
      * width wins and the table grows past the minimum. */
-    table_t table(2);
-
     const int min_widths[2] = {3, 3};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 2;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
@@ -722,25 +730,6 @@ UCS_TEST_F(test_table,
               "+------------+-----+\n",
               table.render());
 }
-
-UCS_TEST_F(test_table, set_min_col_widths_null_clears_minimums) {
-    /* Set a minimum, then clear it and verify the column shrinks
-     * back to the auto-computed width. */
-    table_t table(1);
-
-    const int min_widths[1] = {12};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
-    ucs_table_set_min_col_widths(table.get(), NULL);
-
-    auto *row = ucs_table_add_row(table.get());
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "x");
-
-    EXPECT_EQ("+---+\n"
-              "| x |\n"
-              "+---+\n",
-              table.render());
-}
-
 
 /* Group L: streaming API (stream_row / print_row / print_separator) */
 
@@ -754,14 +743,15 @@ UCS_TEST_F(test_table,
      * dividing separator between the header and the streamed data;
      * the inline comparison must therefore include an explicit
      * add_separator between the header and the data rows. */
-    table_t streamed(2);
+    /* Lock widths so the streamed cells have predictable widths. */
+    const int min_widths[2] = {4, 4};
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 2;
+    cfg.min_widths          = min_widths;
+    table_t streamed(cfg);
     auto *row = ucs_table_add_row(streamed.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h1");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h2");
-
-    /* Lock widths so the streamed cells have predictable widths. */
-    const int min_widths[2] = {4, 4};
-    ucs_table_set_min_col_widths(streamed.get(), min_widths);
 
     const std::string streamed_out = capture_stdout([&]() {
         ucs_table_print(streamed.get());
@@ -783,8 +773,7 @@ UCS_TEST_F(test_table,
     /* Equivalent fully-inline table: header row, explicit separator
      * (matches the streamed flow's bottom-frame-doubles-as-divider
      * boundary), then the two data rows. */
-    table_t inline_table(2);
-    ucs_table_set_min_col_widths(inline_table.get(), min_widths);
+    table_t inline_table(cfg);
     row = ucs_table_add_row(inline_table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h1");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h2");
@@ -803,9 +792,11 @@ UCS_TEST_F(test_table, stream_row_reset_repopulate_uses_same_widths) {
     /* A stream row reset between two prints produces a different
      * rendered line, but the column widths (from the table) stay
      * the same. */
-    table_t table(2);
     const int min_widths[2] = {5, 5};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 2;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     /* Need a real row in the table so the header gets a meaningful width. */
     auto *header = ucs_table_add_row(table.get());
@@ -843,9 +834,11 @@ UCS_TEST_F(test_table, stream_row_reset_repopulate_uses_same_widths) {
 UCS_TEST_F(test_table, render_row_omits_trailing_newline_for_extra_content) {
     /* render_row writes "| ... |" without a trailing newline so the
      * caller can splice extra content before the final '\n'. */
-    table_t table(2);
     const int min_widths[2] = {3, 3};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 2;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     auto *header = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_LEFT, "%s", "h");
@@ -872,9 +865,11 @@ UCS_TEST_F(test_table, render_row_omits_trailing_newline_for_extra_content) {
 
 UCS_TEST_F(test_table, stream_row_supports_all_alignments) {
     /* Stream rows accept the same alignment selector as regular rows. */
-    table_t table(2);
     const int min_widths[2] = {4, 4};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 2;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     auto *header = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_LEFT, "%s", "L");
@@ -899,9 +894,11 @@ UCS_TEST_F(test_table,
            streamed_row_with_constant_printf_widths_lays_out_flush) {
     /* Caller-supplied min_widths used with matching constant %* printf
      * widths produces cells that fill the column exactly. */
-    table_t table(3);
     const int min_widths[3] = {5, 7, 4};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 3;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     auto *header = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(header, 1, UCS_TABLE_ALIGN_LEFT, "%s", "A");
@@ -1000,8 +997,10 @@ UCS_TEST_F(test_table, centered_cell_with_equal_widths_uses_normalized_width) {
     /* Per-column widths from the row are {1, 6}. equal_widths
      * normalizes both to 6. CENTER 'x' in width 6: pad=5,
      * left_pad=2, right_pad=3. */
-    table_t table(2);
-    ucs_table_set_equal_widths(table.get(), 1);
+    ucs_table_config_t cfg = {};
+    cfg.n_body_cols        = 2;
+    cfg.equal_widths       = 1;
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%s", "x");
@@ -1016,10 +1015,11 @@ UCS_TEST_F(test_table, centered_cell_with_equal_widths_uses_normalized_width) {
 UCS_TEST_F(test_table, centered_cell_with_min_col_widths_respects_minimum) {
     /* min_widths {7} forces col 0 to 7 even though the content is only
      * 2 chars. CENTER 'ab' in 7: pad=5, left_pad=2, right_pad=3. */
-    table_t table(1);
-
     const int min_widths[1] = {7};
-    ucs_table_set_min_col_widths(table.get(), min_widths);
+    ucs_table_config_t cfg  = {};
+    cfg.n_body_cols         = 1;
+    cfg.min_widths          = min_widths;
+    table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%s", "ab");
@@ -1041,7 +1041,7 @@ UCS_TEST_F(test_table, centered_cell_followed_by_merged_cols_keeps_corner) {
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%s", "ctr");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "data1");
-    ucs_table_add_separator_with_merged_cells(table.get(), 1);
+    ucs_table_add_separator_with_merged_cols(table.get(), 1);
 
     row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);

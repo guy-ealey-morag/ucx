@@ -184,11 +184,16 @@ ucp_proto_select_elem_info(ucp_worker_h worker,
 {
     UCS_STRING_BUFFER_ONSTACK(ep_cfg_strb, UCP_PROTO_CONFIG_STR_MAX);
     UCS_STRING_BUFFER_ONSTACK(sel_param_strb, UCP_PROTO_CONFIG_STR_MAX);
+    /* When show_used is set we add a "Selections" column on the left of
+     * the range; otherwise the table starts at the range column. */
+    const unsigned n_cols         = show_used ? 4 : 3;
+    const ucs_table_config_t tcfg = {
+        .n_body_cols = n_cols
+    };
     ucp_proto_query_attr_t proto_attr;
     ucs_table_t table;
     ucs_table_row_t *row;
     size_t range_start, range_end;
-    unsigned n_cols;
     char range_str[32];
     int proto_valid;
 
@@ -206,10 +211,7 @@ ucp_proto_select_elem_info(ucp_worker_h worker,
         return;
     }
 
-    /* When show_used is set we add a "Selections" column on the left of
-     * the range; otherwise the table starts at the range column. */
-    n_cols = show_used ? 4 : 3;
-    ucs_table_init(&table, n_cols);
+    ucs_table_init(&table, &tcfg);
 
     /* Title: two full-width rows (ep_cfg, sel_param) without a separator
      * between them, terminated by a single separator before the headers. */

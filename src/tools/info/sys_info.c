@@ -83,6 +83,11 @@ static void print_sys_topo_add_header(ucs_table_t *table,
 
 static void print_sys_topo_distances(unsigned num_devices)
 {
+    ucs_table_config_t cfg = {
+        .n_body_cols  = 1 + num_devices,
+        .row_prefix   = "# ",
+        .equal_widths = 1,
+    };
     ucs_sys_device_t sys_dev1, sys_dev2;
     ucs_sys_dev_distance_t distance;
     ucs_status_t status;
@@ -91,9 +96,7 @@ static void print_sys_topo_distances(unsigned num_devices)
 
     printf("#\n# System topology\n#\n");
 
-    ucs_table_init(&table, 1 + num_devices);
-    ucs_table_set_row_prefix(&table, "# ");
-    ucs_table_set_equal_widths(&table, 1);
+    ucs_table_init(&table, &cfg);
 
     print_sys_topo_add_header(&table, "MB/s", num_devices);
 
@@ -135,6 +138,11 @@ static void print_sys_topo_distances(unsigned num_devices)
 
 static void print_sys_topo_memory_latency(unsigned num_devices)
 {
+    ucs_table_config_t cfg = {
+        .n_body_cols  = 1 + num_devices,
+        .row_prefix   = "# ",
+        .equal_widths = 1,
+    };
     ucs_sys_dev_distance_t distance;
     ucs_sys_device_t sys_dev;
     ucs_table_row_t *row;
@@ -142,9 +150,7 @@ static void print_sys_topo_memory_latency(unsigned num_devices)
 
     printf("#\n# NUMA memory latency\n#\n");
 
-    ucs_table_init(&table, 1 + num_devices);
-    ucs_table_set_row_prefix(&table, "# ");
-    ucs_table_set_equal_widths(&table, 1);
+    ucs_table_init(&table, &cfg);
 
     print_sys_topo_add_header(&table, "device", num_devices);
 
