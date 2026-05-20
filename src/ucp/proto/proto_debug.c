@@ -187,8 +187,8 @@ ucp_proto_select_elem_info(ucp_worker_h worker,
     ucp_proto_query_attr_t proto_attr;
     ucs_table_t table;
     ucs_table_row_t *row;
-    ucs_table_cell_t *cell;
     size_t range_start, range_end;
+    unsigned n_cols;
     char range_str[32];
     int proto_valid;
 
@@ -206,13 +206,30 @@ ucp_proto_select_elem_info(ucp_worker_h worker,
         return;
     }
 
-    ucs_table_init(&table, 3);
+    /* When show_used is set we add a "Selections" column on the left of
+     * the range; otherwise the table starts at the range column. */
+    n_cols = show_used ? 4 : 3;
+    ucs_table_init(&table, n_cols);
+
+    /* Title: two full-width rows (ep_cfg, sel_param) without a separator
+     * between them, terminated by a single separator before the headers. */
+    row = ucs_table_add_row(&table);
+    ucs_table_row_add_cell_fmt(row, n_cols, UCS_TABLE_ALIGN_LEFT, "%s",
+                               ucs_string_buffer_cstr(&ep_cfg_strb));
 
     row = ucs_table_add_row(&table);
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
-                               ucs_string_buffer_cstr(&ep_cfg_strb));
-    ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_LEFT, "%s",
+    ucs_table_row_add_cell_fmt(row, n_cols, UCS_TABLE_ALIGN_LEFT, "%s",
                                ucs_string_buffer_cstr(&sel_param_strb));
+    ucs_table_add_separator(&table);
+
+    /* Column headers; alignment matches the body cells below. */
+    row = ucs_table_add_row(&table);
+    if (show_used) {
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "Count");
+    }
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "Range");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "Description");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "Config");
     ucs_table_add_separator(&table);
 
     /* One body row per valid protocol range. */
@@ -229,20 +246,14 @@ ucp_proto_select_elem_info(ucp_worker_h worker,
 
         row = ucs_table_add_row(&table);
 
-        /* First body cell holds an optional selection counter (left-
-         * anchored) and the range string (right-anchored). The cell
-         * uses LEFT_RIGHT alignment when both halves are present and
-         * RIGHT alignment when only the range string is shown. */
         ucs_memunits_range_str(range_start, range_end, range_str,
                                sizeof(range_str));
-        cell = ucs_table_row_add_cell(row, 1,
-                                      show_used ? UCS_TABLE_ALIGN_LEFT_RIGHT :
-                                                  UCS_TABLE_ALIGN_RIGHT);
         if (show_used) {
-            ucs_table_cell_appendf(cell, "%u  \t", proto_attr.selections);
+            ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%u",
+                                       proto_attr.selections);
         }
-        ucs_table_cell_appendf(cell, "%s", range_str);
-
+        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, "%s",
+                                   range_str);
         ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s%s",
                                    proto_attr.is_estimation ? "(?) " : "",
                                    proto_attr.desc);

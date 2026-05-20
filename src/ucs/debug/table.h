@@ -33,15 +33,9 @@ BEGIN_C_DECLS
  *   - Cell: a value in one row. Has an explicit alignment selected at
  *     add-cell time:
  *
- *       - LEFT:       "| content                 |"
- *       - RIGHT:      "|                 content |"
- *       - CENTER:     "|         content         |"
- *       - LEFT_RIGHT: "| left            content |"
- *
- *     LEFT_RIGHT cells store a single string that contains exactly one
- *     '\t' separating the left- and right-anchored portions; the '\t'
- *     itself counts as 1 character of cell width, guaranteeing at least
- *     a single space of gap between the two halves at render time.
+ *       - LEFT:   "| content                 |"
+ *       - RIGHT:  "|                 content |"
+ *       - CENTER: "|         content         |"
  *
  *   - Separator: a horizontal "+---+---+" rule between rows. Frame
  *     separators at the top and bottom of the table are inserted
@@ -106,29 +100,22 @@ typedef struct ucs_table_cell ucs_table_cell_t;
  * Cell alignment selector. Set at ucs_table_row_add_cell() time and
  * fixed for the lifetime of the cell.
  *
- * - LEFT:       single string, padded on the right.
- * - RIGHT:      single string, padded on the left.
- * - CENTER:     single string, padded equally on both sides (right side
- *               gets the extra space when padding is odd).
- * - LEFT_RIGHT: caller embeds exactly one '\t' in the cell content;
- *               text before the '\t' is left-anchored, text after is
- *               right-anchored, and the gap between them is filled with
- *               spaces.
+ * - LEFT:   single string, padded on the right.
+ * - RIGHT:  single string, padded on the left.
+ * - CENTER: single string, padded equally on both sides (right side
+ *           gets the extra space when padding is odd).
  */
 typedef enum {
     UCS_TABLE_ALIGN_LEFT,
     UCS_TABLE_ALIGN_RIGHT,
-    UCS_TABLE_ALIGN_CENTER,
-    UCS_TABLE_ALIGN_LEFT_RIGHT
+    UCS_TABLE_ALIGN_CENTER
 } ucs_table_align_t;
 
 
 /*
  * Internal type. Each cell holds a single text buffer plus an explicit
  * alignment. The buffer is managed by the table API; callers must not
- * access it directly. For LEFT_RIGHT cells the buffer must contain
- * exactly one '\t' (the separator between the left- and right-anchored
- * portions) by the time the table is rendered.
+ * access it directly.
  */
 struct ucs_table_cell {
     unsigned            col_span;
@@ -300,12 +287,6 @@ ucs_table_row_t *ucs_table_add_row(ucs_table_t *table);
  * can be passed to ucs_table_cell_appendf() to populate the cell, or
  * used as-is as an empty/carry-over cell. The handle is valid for the
  * lifetime of the table.
- *
- * For UCS_TABLE_ALIGN_LEFT_RIGHT cells, the caller must populate the
- * cell with content containing exactly one '\t' separating the
- * left-anchored and right-anchored portions (the '\t' itself reserves
- * one column of width as the minimum gap between the two halves at
- * render time).
  */
 ucs_table_cell_t *ucs_table_row_add_cell(ucs_table_row_t *row,
                                          unsigned col_span,
@@ -330,12 +311,7 @@ void ucs_table_row_add_cell_fmt(ucs_table_row_t *row, unsigned col_span,
  * Append printf-style content to a cell handle returned by
  * ucs_table_row_add_cell(). Multiple calls concatenate.
  *
- * Asserts on the resulting buffer:
- *   - The text never contains '\n'.
- *   - For LEFT, RIGHT, CENTER cells: the text never contains '\t'.
- *   - For LEFT_RIGHT cells: the text contains at most one '\t' during
- *     incremental appends; the strict "exactly one" check is enforced
- *     at width-compute and render time.
+ * Asserts that the resulting buffer never contains '\n' or '\t'.
  */
 void ucs_table_cell_appendf(ucs_table_cell_t *cell, const char *fmt, ...)
         UCS_F_PRINTF(2, 3);

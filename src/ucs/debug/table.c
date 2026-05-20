@@ -269,32 +269,17 @@ ucs_table_cell_t *ucs_table_row_add_cell(ucs_table_row_t *row,
 
 
 /* Post-format invariants for cell content. Asserts that the buffer
- * contains no '\n' and that the per-alignment '\t' policy holds:
- *
- *   - LEFT / RIGHT / CENTER: no '\t' anywhere.
- *   - LEFT_RIGHT: at most one '\t' (the strict "exactly one" check
- *     happens later, at width-compute / render time).
- *
- * Shared between ucs_table_cell_appendf() and the formatted one-shot
+ * contains neither '\n' nor '\t'. Shared between
+ * ucs_table_cell_appendf() and the formatted one-shot
  * ucs_table_row_add_cell_fmt(). */
 static void ucs_table_cell_check_content(const ucs_table_cell_t *cell)
 {
-    const char *cstr      = ucs_string_buffer_cstr(&cell->text);
-    const char *first_tab = strchr(cstr, '\t');
+    const char *cstr = ucs_string_buffer_cstr(&cell->text);
 
     ucs_assertv(strchr(cstr, '\n') == NULL,
                 "table cell content must not contain '\\n': '%s'", cstr);
-
-    if (cell->align == UCS_TABLE_ALIGN_LEFT_RIGHT) {
-        ucs_assertv((first_tab == NULL) ||
-                            (strchr(first_tab + 1, '\t') == NULL),
-                    "LEFT_RIGHT cell must contain at most one '\\t': '%s'",
-                    cstr);
-    } else {
-        ucs_assertv(first_tab == NULL,
-                    "non-LEFT_RIGHT cell content must not contain '\\t': '%s'",
-                    cstr);
-    }
+    ucs_assertv(strchr(cstr, '\t') == NULL,
+                "table cell content must not contain '\\t': '%s'", cstr);
 }
 
 
@@ -342,30 +327,10 @@ static int ucs_table_cell_pixel_width(const int *body_widths, unsigned start,
 }
 
 
-/* Visible content length of a cell. Uniform across all alignments: the
- * cell text is exactly the bytes that will land inside the rendered cell
- * (the embedded '\t' separator in LEFT_RIGHT cells is itself counted as
- * one column of width, which guarantees at least one space of gap
- * between the two halves at render time).
- *
- * For LEFT_RIGHT cells, this is also the natural place to assert the
- * "exactly one '\t'" invariant — width-compute runs once before render
- * and catches misuse earlier than the render-time assert. */
+/* Visible content length of a cell: the cell text is exactly the bytes
+ * that will land inside the rendered cell. */
 static unsigned ucs_table_cell_content_len(ucs_table_cell_t *cell)
 {
-    const char *cstr;
-    const char *first_tab;
-
-    if (cell->align == UCS_TABLE_ALIGN_LEFT_RIGHT) {
-        cstr      = ucs_string_buffer_cstr(&cell->text);
-        first_tab = strchr(cstr, '\t');
-        ucs_assertv(first_tab != NULL,
-                    "LEFT_RIGHT cell missing '\\t' separator: '%s'", cstr);
-        ucs_assertv(strchr(first_tab + 1, '\t') == NULL,
-                    "LEFT_RIGHT cell must contain exactly one '\\t': '%s'",
-                    cstr);
-    }
-
     return ucs_string_buffer_length(&cell->text);
 }
 
@@ -467,24 +432,16 @@ static void ucs_table_widths_ensure(ucs_table_t *table)
 /* Format a single cell at the given pixel width. Branches on the cell's
  * explicit alignment:
  *
- *   LEFT       "| content                 |"
- *   RIGHT      "|                 content |"
- *   CENTER     "|        content          |" (right side gets the extra
- *                                              space when padding is odd)
- *   LEFT_RIGHT "| left              right |" (split on first '\t';
- *                                              the gap is the spaces
- *                                              between the halves and is
- *                                              guaranteed >= 1 by the
- *                                              width algorithm, since
- *                                              the separator '\t' itself
- *                                              counts as 1 char of width)
+ *   LEFT   "| content                 |"
+ *   RIGHT  "|                 content |"
+ *   CENTER "|        content          |" (right side gets the extra
+ *                                          space when padding is odd)
  */
 static void ucs_table_render_cell(ucs_string_buffer_t *strb,
                                   const ucs_table_cell_t *cell, int pixel_width)
 {
     const char *cstr = ucs_string_buffer_cstr(&cell->text);
-    int content_len, pad, left_pad, right_pad, left_len, right_len, gap;
-    const char *sep, *right_text;
+    int content_len, pad, left_pad, right_pad;
 
     switch (cell->align) {
     case UCS_TABLE_ALIGN_LEFT:
@@ -503,32 +460,19 @@ static void ucs_table_render_cell(ucs_string_buffer_t *strb,
         ucs_string_buffer_appendf(strb, "| %*s%s%*s ", left_pad, "", cstr,
                                   right_pad, "");
         break;
-
-    case UCS_TABLE_ALIGN_LEFT_RIGHT:
-        sep = strchr(cstr, '\t');
-        ucs_assertv(sep != NULL,
-                    "LEFT_RIGHT cell missing '\\t' separator: '%s'", cstr);
-        left_len   = (int)(sep - cstr);
-        right_text = sep + 1;
-        right_len  = (int)strlen(right_text);
-        gap        = pixel_width - left_len - right_len;
-        ucs_assertv(gap >= 1, "LEFT_RIGHT cell '%.*s' + '%s' exceeds width %d",
-                    left_len, cstr, right_text, pixel_width);
-        ucs_string_buffer_appendf(strb, "| %.*s%*s%s ", left_len, cstr, gap, "",
-                                  right_text);
-        break;
     }
 }
 
 
 /* Render one body row (line of cells) into strb. Used for both
  * regular and stream rows: the caller passes the appropriate cells
- * array. `with_newline` controls whether the closing "|" is followed
- * by '\n' — stream rows in -X mode need the newline omitted so the
- * caller can splice trailing content before the line break. */
-static void
-ucs_table_render_cells(const ucs_table_t *table, ucs_string_buffer_t *strb,
-                       const ucs_table_cells_t *cells, int with_newline)
+ * array. The closing "|" is emitted without a trailing newline; the
+ * caller appends '\n' when needed — stream rows in -X mode skip the
+ * newline so the caller can splice trailing content before the line
+ * break. */
+static void ucs_table_render_cells(const ucs_table_t *table,
+                                   ucs_string_buffer_t *strb,
+                                   const ucs_table_cells_t *cells)
 {
     const ucs_table_cell_t *cell;
     unsigned body_col = 0;
@@ -546,15 +490,7 @@ ucs_table_render_cells(const ucs_table_t *table, ucs_string_buffer_t *strb,
                                                          cell->col_span));
         body_col += cell->col_span;
     }
-    ucs_string_buffer_appendf(strb, with_newline ? "|\n" : "|");
-}
-
-
-static void ucs_table_render_row_entry(const ucs_table_t *table,
-                                       ucs_string_buffer_t *strb,
-                                       const ucs_table_entry_t *entry)
-{
-    ucs_table_render_cells(table, strb, &entry->cells, /*with_newline=*/1);
+    ucs_string_buffer_appendf(strb, "|");
 }
 
 
@@ -614,12 +550,15 @@ void ucs_table_render(ucs_table_t *table, ucs_string_buffer_t *strb)
 
     for (i = 0; i < ucs_array_length(&table->entries); ++i) {
         entry = &ucs_array_elem(&table->entries, i);
-        if (entry->kind == UCS_TABLE_ENTRY_ROW) {
-            ucs_table_render_row_entry(table, strb, entry);
-            continue;
+        switch (entry->kind) {
+        case UCS_TABLE_ENTRY_ROW:
+            ucs_table_render_cells(table, strb, &entry->cells);
+            ucs_string_buffer_appendf(strb, "\n");
+            break;
+        case UCS_TABLE_ENTRY_SEPARATOR:
+            ucs_table_render_separator(table, strb, entry->merged_cols);
+            break;
         }
-
-        ucs_table_render_separator(table, strb, entry->merged_cols);
     }
 
     /* Bottom frame; skip only when the last entry is already a
@@ -733,8 +672,7 @@ void ucs_table_render_row(const ucs_table_row_t *row, ucs_string_buffer_t *strb)
     ucs_assert(row->kind == UCS_TABLE_ROW_STREAM);
     ucs_assert(row->table->widths != NULL);
 
-    ucs_table_render_cells(row->table, strb, &row->u.cells,
-                           /*with_newline=*/0);
+    ucs_table_render_cells(row->table, strb, &row->u.cells);
 }
 
 
@@ -743,8 +681,7 @@ void ucs_table_print_row(const ucs_table_row_t *row)
     ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
 
     ucs_table_render_row(row, &strb);
-    ucs_string_buffer_appendf(&strb, "\n");
-    printf("%s", ucs_string_buffer_cstr(&strb));
+    printf("%s\n", ucs_string_buffer_cstr(&strb));
     ucs_string_buffer_cleanup(&strb);
 }
 
