@@ -815,17 +815,27 @@ UCS_TEST_F(test_table, center_with_min_widths) {
 }
 
 UCS_TEST_F(test_table, render_twice) {
-    /* Cached widths early-return: second render must match the first. */
+    /* Widths are recomputed on every render: a wider row added between
+     * renders must widen the columns on the second render. */
     table_t table(2);
     auto *row = ucs_table_add_row(table.get());
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "a");
     ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", "b");
 
-    const std::string first  = table.render();
-    const std::string second = table.render();
-    EXPECT_EQ(first, second);
     EXPECT_EQ("+---+---+\n"
               "| a | b |\n"
               "+---+---+\n",
-              first);
+              table.render());
+
+    row = ucs_table_add_row(table.get());
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "long-cell-1");
+    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               "long-cell-2");
+
+    EXPECT_EQ("+-------------+-------------+\n"
+              "| a           | b           |\n"
+              "| long-cell-1 | long-cell-2 |\n"
+              "+-------------+-------------+\n",
+              table.render());
 }

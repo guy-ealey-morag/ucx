@@ -28,11 +28,10 @@ BEGIN_C_DECLS
  * above into the cell below.
  *
  * Lifecycle:
- *   - Building: add_row / add_separator / row_add_cell. Asserts if called
- *     after render().
- *   - Rendered: render() computes column widths and keeps them alive on
- *     the table. Streaming rows (see below) and additional printed
- *     separators may be emitted against the cached widths.
+ *   - Building: add_row / add_separator / row_add_cell. May be interleaved
+ *     with render() calls; widths are recomputed on every render so new
+ *     content widens columns as needed.
+ *   - Rendered: render() (re)computes column widths and emits the table.
  *   - Cleanup: cleanup() releases everything; stream rows must be destroyed
  *     first.
  *
@@ -120,8 +119,7 @@ typedef struct ucs_table {
                                                 deep-copied */
     ucs_table_entries_t     entries;
     ucs_table_row_handles_t row_handles;
-    int                     *widths; /**< per-column widths; NULL while
-                                                building, set by render */
+    int                     *widths; /**< per-column widths; set by render */
     unsigned                n_stream_rows; /**< live stream rows; asserted 0
                                                 at cleanup */
 } ucs_table_t;
@@ -209,10 +207,9 @@ void ucs_table_row_add_cell_fmt(ucs_table_row_t *row, unsigned col_span,
 
 
 /**
- * Render the table into @a strb. Computes column widths on the first call
- * and emits top frame + body rows/separators + bottom frame. Widths stay
- * alive on the table until ucs_table_cleanup() so streamed rows can use
- * them.
+ * Render the table into @a strb. Recomputes column widths on every call,
+ * adapting to any rows or separators added since the previous render, and
+ * emits top frame + body rows/separators + bottom frame.
  *
  * @param [in,out] table  Table to render.
  * @param [in,out] strb   Destination string buffer.
