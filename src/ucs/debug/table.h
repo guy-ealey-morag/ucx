@@ -285,16 +285,6 @@ void ucs_table_print_row(const ucs_table_row_t *row);
 void ucs_table_print_separator(ucs_table_t *table);
 
 
-/**
- * Tokenize @a strb by '\n' and emit each line via ucs_log_print_compact.
- * Does not clean up the buffer; the caller owns it.
- *
- * TODO: Remove after PR #11435 is merged.
- *
- * @param [in] strb  String buffer to tokenize.
- */
-void ucs_log_print_compact_lines(ucs_string_buffer_t *strb);
-
 END_C_DECLS
 
 #endif

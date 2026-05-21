@@ -318,7 +318,7 @@ void ucp_context_log_tl_info(ucp_context_h context,
     }
 
     ucs_table_render(&table, &strb);
-    ucs_log_print_compact_lines(&strb);
+    ucs_log_print_compact(ucs_string_buffer_cstr(&strb));
     ucs_string_buffer_cleanup(&strb);
     ucs_table_cleanup(&table);
 }

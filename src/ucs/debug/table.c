@@ -537,13 +537,3 @@ void ucs_table_print_separator(ucs_table_t *table)
     printf("%s", ucs_string_buffer_cstr(&strb));
     ucs_string_buffer_cleanup(&strb);
 }
-
-
-void ucs_log_print_compact_lines(ucs_string_buffer_t *strb)
-{
-    char *line;
-
-    ucs_string_buffer_for_each_token(line, strb, "\n") {
-        ucs_log_print_compact(line);
-    }
-}
