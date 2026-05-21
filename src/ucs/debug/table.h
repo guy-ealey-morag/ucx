@@ -97,17 +97,17 @@ UCS_ARRAY_DECLARE_TYPE(ucs_table_row_handles_t, unsigned, ucs_table_row_t*);
  */
 typedef struct ucs_table_config {
     /** Number of body columns; per-row cells' col_spans must sum to this. */
-    unsigned   n_body_cols;
+    unsigned       n_body_cols;
     /** Prepended to every rendered line, or NULL. Caller-owned; must outlive
      *  the table. */
-    const char *row_prefix;
+    const char     *row_prefix;
     /** Per-column lower bounds for the computed widths, or NULL. Length must
      *  be >= n_body_cols. Useful for streamed rows whose content the table
      *  never measures. Deep-copied into the table during init. */
-    const int  *min_widths;
+    const unsigned *min_widths;
     /** When non-zero, render every body column at the maximum computed
      *  width so all columns are equal-width. */
-    int        equal_widths;
+    int            equal_widths;
 } ucs_table_config_t;
 
 
@@ -119,7 +119,7 @@ typedef struct ucs_table {
                                                 deep-copied */
     ucs_table_entries_t     entries;
     ucs_table_row_handles_t row_handles;
-    int                     *widths; /**< per-column widths; set by render */
+    unsigned                *widths; /**< per-column widths; set by render */
     unsigned                n_stream_rows; /**< live stream rows; asserted 0
                                                 at cleanup */
 } ucs_table_t;

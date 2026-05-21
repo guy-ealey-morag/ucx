@@ -172,10 +172,10 @@ UCS_TEST_F(test_table, separator_plain) {
 }
 
 UCS_TEST_F(test_table, separator_merged_1_of_2) {
-    const int min_widths[2] = {3, 3};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 2;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[2] = {3, 3};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 2;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
@@ -196,10 +196,10 @@ UCS_TEST_F(test_table, separator_merged_1_of_2) {
 }
 
 UCS_TEST_F(test_table, separator_merged_1_of_3) {
-    const int min_widths[3] = {3, 3, 3};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 3;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[3] = {3, 3, 3};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 3;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
@@ -222,10 +222,10 @@ UCS_TEST_F(test_table, separator_merged_1_of_3) {
 }
 
 UCS_TEST_F(test_table, separator_merged_2_of_3) {
-    const int min_widths[3] = {3, 3, 3};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 3;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[3] = {3, 3, 3};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 3;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
@@ -248,10 +248,10 @@ UCS_TEST_F(test_table, separator_merged_2_of_3) {
 UCS_TEST_F(test_table, separator_merged_captured_at_add_time) {
     /* Each separator captures its own merged_cols at add time; row content
      * added later must not retroactively change how the separator renders. */
-    const int min_widths[2] = {3, 3};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 2;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[2] = {3, 3};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 2;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
@@ -312,10 +312,10 @@ UCS_TEST_F(test_table, trailing_merged_separator_suppresses_bottom_frame) {
 }
 
 UCS_TEST_F(test_table, consecutive_separators) {
-    const int min_widths[1] = {3};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 1;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[1] = {3};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 1;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
@@ -549,10 +549,10 @@ UCS_TEST_F(test_table, equal_widths_after_col_span_expansion) {
 }
 
 UCS_TEST_F(test_table, min_widths_widens) {
-    const int min_widths[2] = {10, 10};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 2;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[2] = {10, 10};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 2;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
@@ -567,10 +567,10 @@ UCS_TEST_F(test_table, min_widths_widens) {
 
 UCS_TEST_F(test_table, min_widths_does_not_shrink) {
     /* min_widths is a floor, not a ceiling. */
-    const int min_widths[2] = {3, 3};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 2;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[2] = {3, 3};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 2;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
@@ -587,10 +587,10 @@ UCS_TEST_F(test_table, min_widths_does_not_shrink) {
 UCS_TEST_F(test_table, stream_print_matches_inline) {
     /* ucs_table_print emits its own bottom frame after the header, which
      * doubles as the divider before the streamed rows. */
-    const int min_widths[2] = {4, 4};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 2;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[2] = {4, 4};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 2;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());
@@ -624,10 +624,10 @@ UCS_TEST_F(test_table, stream_print_matches_inline) {
 }
 
 UCS_TEST_F(test_table, stream_row_reset) {
-    const int min_widths[2] = {5, 5};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 2;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[2] = {5, 5};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 2;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *header = ucs_table_add_row(table.get());
@@ -662,10 +662,10 @@ UCS_TEST_F(test_table, stream_row_reset) {
 UCS_TEST_F(test_table, stream_render_row_no_newline) {
     /* render_row omits the trailing newline so callers can splice extra
      * content before the line break. */
-    const int min_widths[2] = {3, 3};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 2;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[2] = {3, 3};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 2;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *header = ucs_table_add_row(table.get());
@@ -690,10 +690,10 @@ UCS_TEST_F(test_table, stream_render_row_no_newline) {
 }
 
 UCS_TEST_F(test_table, stream_row_all_alignments) {
-    const int min_widths[2] = {4, 4};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 2;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[2] = {4, 4};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 2;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *header = ucs_table_add_row(table.get());
@@ -716,10 +716,10 @@ UCS_TEST_F(test_table, stream_row_all_alignments) {
 UCS_TEST_F(test_table, stream_row_printf_widths_flush) {
     /* Matching %* widths in printf and min_widths produce flush-aligned
      * cells. */
-    const int min_widths[3] = {5, 7, 4};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 3;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[3] = {5, 7, 4};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 3;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *header = ucs_table_add_row(table.get());
@@ -732,11 +732,11 @@ UCS_TEST_F(test_table, stream_row_printf_widths_flush) {
 
         auto *stream = ucs_table_stream_row_create(table.get());
         ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_RIGHT, "%*.0f",
-                                   min_widths[0], 12.0);
+                                   (int)min_widths[0], 12.0);
         ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_RIGHT, "%*.2f",
-                                   min_widths[1], 1.5);
+                                   (int)min_widths[1], 1.5);
         ucs_table_row_add_cell_fmt(stream, 1, UCS_TABLE_ALIGN_RIGHT, "%*d",
-                                   min_widths[2], 7);
+                                   (int)min_widths[2], 7);
         ucs_table_print_row(stream);
         ucs_table_stream_row_destroy(stream);
     });
@@ -799,10 +799,10 @@ UCS_TEST_F(test_table, center_odd_padding_biases_right) {
 }
 
 UCS_TEST_F(test_table, center_with_min_widths) {
-    const int min_widths[1] = {7};
-    ucs_table_config_t cfg  = {};
-    cfg.n_body_cols         = 1;
-    cfg.min_widths          = min_widths;
+    const unsigned min_widths[1] = {7};
+    ucs_table_config_t cfg       = {};
+    cfg.n_body_cols              = 1;
+    cfg.min_widths               = min_widths;
     table_t table(cfg);
 
     auto *row = ucs_table_add_row(table.get());

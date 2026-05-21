@@ -4,10 +4,6 @@
  * See file LICENSE for terms.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
-
 #include "table.h"
 
 #include <ucs/datastruct/array.h>
@@ -19,18 +15,6 @@
 #include <ucs/sys/string.h>
 #include <stdio.h>
 #include <string.h>
-
-
-/* Pre-sized dash buffer for separator rendering; UCS_TABLE_DASH_MAX below
- * is its length. */
-static const char ucs_table_dashes[] =
-        "----------------------------------------------------------------"
-        "----------------------------------------------------------------"
-        "----------------------------------------------------------------"
-        "----------------------------------------------------------------";
-
-
-#define UCS_TABLE_DASH_MAX ((int)(sizeof(ucs_table_dashes) - 1))
 
 
 /* Discriminates regular rows (cells in table->entries) from stream rows
@@ -53,7 +37,7 @@ struct ucs_table_row {
 
 void ucs_table_init(ucs_table_t *table, const ucs_table_config_t *config)
 {
-    int *owned_min_widths;
+    unsigned *owned_min_widths;
 
     table->config        = *config;
     table->n_stream_rows = 0;
@@ -66,20 +50,19 @@ void ucs_table_init(ucs_table_t *table, const ucs_table_config_t *config)
         ucs_fatal("failed to allocate table widths");
     }
 
-    if (config->min_widths == NULL) {
-        return;
-    }
+    if (config->min_widths != NULL) {
+        /* Deep-copy so the caller's array can be transient. */
+        owned_min_widths = ucs_malloc(config->n_body_cols *
+                                              sizeof(*owned_min_widths),
+                                      "ucs_table_min_widths");
+        if (owned_min_widths == NULL) {
+            ucs_fatal("failed to allocate table min widths");
+        }
 
-    /* Deep-copy so the caller's array can be transient. */
-    owned_min_widths = ucs_malloc(config->n_body_cols *
-                                          sizeof(*owned_min_widths),
-                                  "ucs_table_min_widths");
-    if (owned_min_widths == NULL) {
-        ucs_fatal("failed to allocate table min widths");
+        memcpy(owned_min_widths, config->min_widths,
+               config->n_body_cols * sizeof(*owned_min_widths));
+        table->config.min_widths = owned_min_widths;
     }
-    memcpy(owned_min_widths, config->min_widths,
-           config->n_body_cols * sizeof(*owned_min_widths));
-    table->config.min_widths = owned_min_widths;
 }
 
 
@@ -112,7 +95,6 @@ void ucs_table_cleanup(ucs_table_t *table)
     ucs_free(table->widths);
     table->widths = NULL;
 
-    /* Cast drops the public-API const; the storage is table-owned. */
     ucs_free((void*)table->config.min_widths);
     table->config.min_widths = NULL;
 }
@@ -127,12 +109,10 @@ void ucs_table_add_separator_with_merged_cols(ucs_table_t *table,
                 "merged_cols=%u exceeds n_body_cols=%u", merged_cols,
                 table->config.n_body_cols);
 
-    entry = ucs_array_append(&table->entries, ucs_fatal("failed to grow table "
-                                                        "entries"));
+    entry              = ucs_array_append(&table->entries,
+                                          ucs_fatal("failed to grow table entries"));
     entry->kind        = UCS_TABLE_ENTRY_SEPARATOR;
     entry->merged_cols = merged_cols;
-    /* unused for separators; init for safe cleanup */
-    ucs_array_init_dynamic(&entry->cells);
 }
 
 
@@ -194,13 +174,10 @@ ucs_table_cell_t *ucs_table_row_add_cell(ucs_table_row_t *row,
                                          unsigned col_span,
                                          ucs_table_align_t align)
 {
-    ucs_table_cells_t *cells;
-    ucs_table_cell_t *cell;
-
-    cells = ucs_table_row_cells(row);
-
-    cell = ucs_array_append(cells, ucs_fatal("table row exceeded body "
-                                             "column count"));
+    ucs_table_cells_t *cells = ucs_table_row_cells(row);
+    ucs_table_cell_t *cell =
+            ucs_array_append(cells, ucs_fatal("table row exceeded body "
+                                              "column count"));
     cell->col_span = col_span;
     cell->align    = align;
     ucs_string_buffer_init(&cell->text);
@@ -229,16 +206,16 @@ void ucs_table_row_add_cell_fmt(ucs_table_row_t *row, unsigned col_span,
 /* Total visible width of a cell spanning `col_span` body columns. Each
  * merged column adds its own width plus the " | " (3 chars) it would have
  * used as a separator. */
-static int ucs_table_cell_pixel_width(const int *body_widths, unsigned start,
-                                      unsigned col_span)
+static unsigned ucs_table_cell_pixel_width(const unsigned *body_widths,
+                                           unsigned start, unsigned col_span)
 {
-    int width = 0;
+    unsigned width = 0;
     unsigned i;
 
     for (i = 0; i < col_span; ++i) {
         width += body_widths[start + i];
     }
-    width += 3 * ((int)col_span - 1);
+    width += 3 * (col_span - 1);
     return width;
 }
 
@@ -260,12 +237,12 @@ static unsigned ucs_table_cell_content_len(ucs_table_cell_t *cell)
  * content the table does not see. */
 static void ucs_table_compute_widths(ucs_table_t *table)
 {
-    const int *min_widths = table->config.min_widths;
-    int *widths           = table->widths;
+    const unsigned *min_widths = table->config.min_widths;
+    unsigned *widths           = table->widths;
     ucs_table_entry_t *entry;
     ucs_table_cell_t *cell;
     unsigned i, body_col, content_len;
-    int existing;
+    unsigned existing;
 
     for (i = 0; i < table->config.n_body_cols; ++i) {
         widths[i] = (min_widths != NULL) ? min_widths[i] : 0;
@@ -280,7 +257,7 @@ static void ucs_table_compute_widths(ucs_table_t *table)
         ucs_array_for_each(cell, &entry->cells) {
             if (cell->col_span == 1) {
                 content_len      = ucs_table_cell_content_len(cell);
-                widths[body_col] = ucs_max(widths[body_col], (int)content_len);
+                widths[body_col] = ucs_max(widths[body_col], content_len);
             }
             body_col += cell->col_span;
         }
@@ -299,8 +276,8 @@ static void ucs_table_compute_widths(ucs_table_t *table)
                 existing    = ucs_table_cell_pixel_width(widths, body_col,
                                                          cell->col_span);
 
-                if ((int)content_len > existing) {
-                    widths[body_col + cell->col_span - 1] += (int)content_len -
+                if (content_len > existing) {
+                    widths[body_col + cell->col_span - 1] += content_len -
                                                              existing;
                 }
             }
@@ -311,7 +288,7 @@ static void ucs_table_compute_widths(ucs_table_t *table)
     /* Equal-widths: widen every column to the max (runs after pass 2 so
      * it can only widen). */
     if (table->config.equal_widths) {
-        int max_width = 0;
+        unsigned max_width = 0;
         for (i = 0; i < table->config.n_body_cols; ++i) {
             max_width = ucs_max(max_width, widths[i]);
         }
@@ -324,23 +301,24 @@ static void ucs_table_compute_widths(ucs_table_t *table)
 
 /* Format a single cell at the given pixel width, branching on alignment. */
 static void ucs_table_render_cell(ucs_string_buffer_t *strb,
-                                  const ucs_table_cell_t *cell, int pixel_width)
+                                  const ucs_table_cell_t *cell,
+                                  unsigned pixel_width)
 {
     const char *cstr = ucs_string_buffer_cstr(&cell->text);
     int content_len, pad, left_pad, right_pad;
 
     switch (cell->align) {
     case UCS_TABLE_ALIGN_LEFT:
-        ucs_string_buffer_appendf(strb, "| %-*s ", pixel_width, cstr);
+        ucs_string_buffer_appendf(strb, "| %-*s ", (int)pixel_width, cstr);
         break;
 
     case UCS_TABLE_ALIGN_RIGHT:
-        ucs_string_buffer_appendf(strb, "| %*s ", pixel_width, cstr);
+        ucs_string_buffer_appendf(strb, "| %*s ", (int)pixel_width, cstr);
         break;
 
     case UCS_TABLE_ALIGN_CENTER:
         content_len = (int)strlen(cstr);
-        pad         = ucs_max(pixel_width - content_len, 0);
+        pad         = ucs_max((int)pixel_width - content_len, 0);
         left_pad    = pad / 2;
         right_pad   = pad - left_pad;
         ucs_string_buffer_appendf(strb, "| %*s%s%*s ", left_pad, "", cstr,
@@ -380,8 +358,14 @@ static void ucs_table_render_separator(const ucs_table_t *table,
                                        ucs_string_buffer_t *strb,
                                        unsigned merged_cols)
 {
+    static const char dashes[] =
+            "----------------------------------------------------------------"
+            "----------------------------------------------------------------"
+            "----------------------------------------------------------------"
+            "----------------------------------------------------------------";
+    const unsigned max_width = sizeof(dashes) - 1;
     char left_corner;
-    int width;
+    unsigned width;
     unsigned i;
 
     if (table->config.row_prefix != NULL) {
@@ -390,9 +374,8 @@ static void ucs_table_render_separator(const ucs_table_t *table,
 
     for (i = 0; i < table->config.n_body_cols; ++i) {
         width = table->widths[i];
-        ucs_assertv((width >= 0) && (width <= UCS_TABLE_DASH_MAX),
-                    "widths[%u]=%d out of range [0, %d]", i, width,
-                    UCS_TABLE_DASH_MAX);
+        ucs_assertv(width <= max_width, "widths[%u]=%u out of range [0, %u]", i,
+                    width, max_width);
 
         if (i < merged_cols) {
             left_corner = '|';
@@ -401,10 +384,11 @@ static void ucs_table_render_separator(const ucs_table_t *table,
         }
 
         if (i < merged_cols) {
-            ucs_string_buffer_appendf(strb, "%c %-*s ", left_corner, width, "");
+            ucs_string_buffer_appendf(strb, "%c %-*s ", left_corner, (int)width,
+                                      "");
         } else {
-            ucs_string_buffer_appendf(strb, "%c-%.*s-", left_corner, width,
-                                      ucs_table_dashes);
+            ucs_string_buffer_appendf(strb, "%c-%.*s-", left_corner, (int)width,
+                                      dashes);
         }
     }
 
@@ -419,8 +403,10 @@ void ucs_table_render(ucs_table_t *table, ucs_string_buffer_t *strb)
 
     ucs_table_compute_widths(table);
 
+    /* Top frame */
     ucs_table_render_separator(table, strb, 0);
 
+    /* Body rows and separators */
     for (i = 0; i < ucs_array_length(&table->entries); ++i) {
         entry = &ucs_array_elem(&table->entries, i);
         switch (entry->kind) {
@@ -428,6 +414,7 @@ void ucs_table_render(ucs_table_t *table, ucs_string_buffer_t *strb)
             ucs_table_render_cells(table, strb, &entry->cells);
             ucs_string_buffer_appendf(strb, "\n");
             break;
+
         case UCS_TABLE_ENTRY_SEPARATOR:
             ucs_table_render_separator(table, strb, entry->merged_cols);
             break;
@@ -528,7 +515,6 @@ void ucs_table_stream_row_destroy(ucs_table_row_t *row)
 void ucs_table_render_row(const ucs_table_row_t *row, ucs_string_buffer_t *strb)
 {
     ucs_assert(row->kind == UCS_TABLE_ROW_STREAM);
-
     ucs_table_render_cells(row->table, strb, &row->u.cells);
 }
 

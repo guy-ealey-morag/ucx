@@ -33,23 +33,22 @@
  * widths (18, 11), eliminating the overflow that today's hand-drawn
  * separator silently allowed. */
 #define PERFTEST_RESULTS_N_COLS 9
-static const int results_col_widths[PERFTEST_RESULTS_N_COLS] = {14, 18, 10,
-                                                                9,  9,  11,
-                                                                10, 11, 11};
+static const unsigned results_col_widths[PERFTEST_RESULTS_N_COLS] =
+        {14, 18, 10, 9, 9, 11, 10, 11, 11};
 
 
 /* Visible pixel width of body columns [col, col + col_span). Mirrors
  * ucs_table_cell_pixel_width() so the printf %* width passed to
  * stream-row cells exactly matches the cell width the table will draw. */
-static int perftest_results_col_width(unsigned col, unsigned col_span)
+static unsigned perftest_results_col_width(unsigned col, unsigned col_span)
 {
-    int w = 0;
+    unsigned w = 0;
     unsigned i;
 
     for (i = 0; i < col_span; ++i) {
         w += results_col_widths[col + i];
     }
-    return w + 3 * ((int)col_span - 1);
+    return w + 3 * (col_span - 1);
 }
 
 
@@ -228,16 +227,16 @@ static void perftest_add_meta_rows(ucs_table_t *table,
 static void perftest_results_table_open(struct perftest_context *ctx,
                                         const test_type_t *test)
 {
-    const int is_final         = !!(ctx->flags & TEST_FLAG_PRINT_FINAL);
-    const int print_test       = !!(ctx->flags & TEST_FLAG_PRINT_TEST);
-    const int print_csv        = !!(ctx->flags & TEST_FLAG_PRINT_CSV);
-    const int has_meta         = print_test && (test != NULL) &&
-                                 ((test->api == UCX_PERF_API_UCT) ||
-                                  (test->api == UCX_PERF_API_UCP));
-    const int has_headers      = (ctx->flags & TEST_FLAG_PRINT_RESULTS) &&
-                                 !print_csv;
-    ucs_table_config_t cfg     = {};
-    int min_widths[PERFTEST_RESULTS_N_COLS];
+    const int is_final     = !!(ctx->flags & TEST_FLAG_PRINT_FINAL);
+    const int print_test   = !!(ctx->flags & TEST_FLAG_PRINT_TEST);
+    const int print_csv    = !!(ctx->flags & TEST_FLAG_PRINT_CSV);
+    const int has_meta     = print_test && (test != NULL) &&
+                             ((test->api == UCX_PERF_API_UCT) ||
+                              (test->api == UCX_PERF_API_UCP));
+    const int has_headers  = (ctx->flags & TEST_FLAG_PRINT_RESULTS) &&
+                             !print_csv;
+    ucs_table_config_t cfg = {};
+    unsigned min_widths[PERFTEST_RESULTS_N_COLS];
     const char *overhead_lat_str;
     ucs_table_row_t *row;
     unsigned i;
@@ -252,7 +251,7 @@ static void perftest_results_table_open(struct perftest_context *ctx,
         memcpy(min_widths, results_col_widths, sizeof(min_widths));
         if (is_final) {
             min_widths[0] = ucs_max(min_widths[0],
-                                    (int)ctx->max_test_name_width);
+                                    (unsigned)ctx->max_test_name_width);
         }
         cfg.min_widths = min_widths;
     }
@@ -479,46 +478,46 @@ void print_progress(void *UCS_V_UNUSED rte_group,
          * automatically match the merged-cell pixel widths of the table
          * (the bug today's hand-coded 29/22/23 widths exhibited). */
         ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_int,
-                                   perftest_results_col_width(1, 1),
+                                   (int)perftest_results_col_width(1, 1),
                                    (double)result->iters);
         ucs_table_row_add_cell_fmt(row, 3, UCS_TABLE_ALIGN_RIGHT, fmt_lat,
-                                   perftest_results_col_width(2, 3),
+                                   (int)perftest_results_col_width(2, 3),
                                    result->latency.total_average * 1e6);
         ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_RIGHT, fmt_bw,
-                                   perftest_results_col_width(5, 2),
+                                   (int)perftest_results_col_width(5, 2),
                                    result->bandwidth.total_average /
                                            (1024.0 * 1024.0));
         ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_RIGHT, fmt_int,
-                                   perftest_results_col_width(7, 2),
+                                   (int)perftest_results_col_width(7, 2),
                                    result->msgrate.total_average);
     } else {
         /* Normal: 8 cells of col_span 1. iters + msgrate (avg, overall)
          * use fmt_int; the others are plain. */
         ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_int,
-                                   results_col_widths[1],
+                                   (int)results_col_widths[1],
                                    (double)result->iters);
         ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_lat,
-                                   results_col_widths[2],
+                                   (int)results_col_widths[2],
                                    result->latency.percentile * 1e6);
         ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_lat,
-                                   results_col_widths[3],
+                                   (int)results_col_widths[3],
                                    result->latency.moment_average * 1e6);
         ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_lat,
-                                   results_col_widths[4],
+                                   (int)results_col_widths[4],
                                    result->latency.total_average * 1e6);
         ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_bw,
-                                   results_col_widths[5],
+                                   (int)results_col_widths[5],
                                    result->bandwidth.moment_average /
                                            (1024.0 * 1024.0));
         ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_bw,
-                                   results_col_widths[6],
+                                   (int)results_col_widths[6],
                                    result->bandwidth.total_average /
                                            (1024.0 * 1024.0));
         ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_int,
-                                   results_col_widths[7],
+                                   (int)results_col_widths[7],
                                    result->msgrate.moment_average);
         ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_int,
-                                   results_col_widths[8],
+                                   (int)results_col_widths[8],
                                    result->msgrate.total_average);
     }
 
