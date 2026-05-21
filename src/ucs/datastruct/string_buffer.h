@@ -155,8 +155,7 @@ void ucs_string_buffer_appendf(ucs_string_buffer_t *strb, const char *fmt, ...)
 
 
 /**
- * va_list counterpart of @ref ucs_string_buffer_appendf. Same growth and
- * truncation semantics.
+ * va_list counterpart of @ref ucs_string_buffer_appendf.
  *
  * @param [inout] strb   String buffer to append to.
  * @param [in]    fmt    Format string.
