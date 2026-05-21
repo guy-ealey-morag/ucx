@@ -29,9 +29,9 @@ struct ucs_table_row {
     ucs_table_t          *table;
     ucs_table_row_kind_t kind;
     union {
-        unsigned          entry_idx; /* index into table->entries */
-        ucs_table_cells_t cells; /* cells owned by this row */
-    } u;
+        unsigned          entry_idx; /* UCS_TABLE_ROW_REGULAR */
+        ucs_table_cells_t cells; /* UCS_TABLE_ROW_STREAM */
+    };
 };
 
 
@@ -144,9 +144,9 @@ ucs_table_row_t *ucs_table_add_row(ucs_table_t *table)
         ucs_fatal("failed to reserve table row cells");
     }
 
-    row->table       = table;
-    row->kind        = UCS_TABLE_ROW_REGULAR;
-    row->u.entry_idx = ucs_array_length(&table->entries) - 1;
+    row->table     = table;
+    row->kind      = UCS_TABLE_ROW_REGULAR;
+    row->entry_idx = ucs_array_length(&table->entries) - 1;
 
     row_slot  = ucs_array_append(&table->row_handles,
                                  ucs_fatal("failed to grow table row handles"));
@@ -161,10 +161,10 @@ static ucs_table_cells_t *ucs_table_row_cells(ucs_table_row_t *row)
     ucs_table_entry_t *entry;
 
     if (row->kind == UCS_TABLE_ROW_STREAM) {
-        return &row->u.cells;
+        return &row->cells;
     }
 
-    entry = &ucs_array_elem(&row->table->entries, row->u.entry_idx);
+    entry = &ucs_array_elem(&row->table->entries, row->entry_idx);
     ucs_assert(entry->kind == UCS_TABLE_ENTRY_ROW);
     return &entry->cells;
 }
@@ -203,9 +203,7 @@ void ucs_table_row_add_cell_fmt(ucs_table_row_t *row, unsigned col_span,
 }
 
 
-/* Total visible width of a cell spanning `col_span` body columns. Each
- * merged column adds its own width plus the " | " (3 chars) it would have
- * used as a separator. */
+/* Calculate the total visible width of a cell spanning `col_span` columns. */
 static unsigned ucs_table_cell_pixel_width(const unsigned *body_widths,
                                            unsigned start, unsigned col_span)
 {
@@ -226,15 +224,6 @@ static unsigned ucs_table_cell_content_len(ucs_table_cell_t *cell)
 }
 
 
-/* Compute per-body-column widths needed to fit every cell. Recomputed on
- * every call so callers may add rows or separators between renders and
- * have widths adapt to the new content. Two passes: pass 1 sizes columns
- * from col_span == 1 cells; pass 2 expands the rightmost spanned column
- * of each merged cell to absorb any remaining deficit. Splitting them
- * prevents merged cells added before the body rows from over-expanding
- * the rightmost spanned column. Each column starts at config.min_widths[i]
- * (or 0 when unset) so the caller can lock in a lower bound for stream-row
- * content the table does not see. */
 static void ucs_table_compute_widths(ucs_table_t *table)
 {
     const unsigned *min_widths = table->config.min_widths;
@@ -451,9 +440,9 @@ ucs_table_row_t *ucs_table_stream_row_create(ucs_table_t *table)
 
     row->table = table;
     row->kind  = UCS_TABLE_ROW_STREAM;
-    ucs_array_init_dynamic(&row->u.cells);
+    ucs_array_init_dynamic(&row->cells);
 
-    status = ucs_array_reserve(&row->u.cells, table->config.n_body_cols);
+    status = ucs_array_reserve(&row->cells, table->config.n_body_cols);
     if (status != UCS_OK) {
         ucs_fatal("failed to reserve stream row cells");
     }
@@ -474,10 +463,10 @@ void ucs_table_stream_row_reset(ucs_table_row_t *row)
     ucs_assert(row->kind == UCS_TABLE_ROW_STREAM);
 
     /* Full cleanup so the next add_cell doesn't leak previous backing memory. */
-    ucs_array_for_each(cell, &row->u.cells) {
+    ucs_array_for_each(cell, &row->cells) {
         ucs_string_buffer_cleanup(&cell->text);
     }
-    ucs_array_set_length(&row->u.cells, 0);
+    ucs_array_set_length(&row->cells, 0);
 }
 
 
@@ -490,10 +479,10 @@ void ucs_table_stream_row_destroy(ucs_table_row_t *row)
 
     ucs_assert(row->kind == UCS_TABLE_ROW_STREAM);
 
-    ucs_array_for_each(cell, &row->u.cells) {
+    ucs_array_for_each(cell, &row->cells) {
         ucs_string_buffer_cleanup(&cell->text);
     }
-    ucs_array_cleanup_dynamic(&row->u.cells);
+    ucs_array_cleanup_dynamic(&row->cells);
 
     /* Remove from row_handles (unordered; replace-with-last). */
     table = row->table;
@@ -515,7 +504,7 @@ void ucs_table_stream_row_destroy(ucs_table_row_t *row)
 void ucs_table_render_row(const ucs_table_row_t *row, ucs_string_buffer_t *strb)
 {
     ucs_assert(row->kind == UCS_TABLE_ROW_STREAM);
-    ucs_table_render_cells(row->table, strb, &row->u.cells);
+    ucs_table_render_cells(row->table, strb, &row->cells);
 }
 
 

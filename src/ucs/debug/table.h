@@ -76,14 +76,13 @@ UCS_ARRAY_DECLARE_TYPE(ucs_table_cells_t, unsigned, ucs_table_cell_t);
 
 
 /**
- * Table entry: a row (vector of cells) or a separator. For separators,
- * `merged_cols` is the number of leading body columns rendered as blank
- * carry-over segments (zero = plain dashed separator); `cells` is unused.
- */
+ * Table entry: a row (vector of cells) or a separator. */
 typedef struct {
     ucs_table_entry_kind_t kind;
-    unsigned               merged_cols;
-    ucs_table_cells_t      cells;
+    union {
+        unsigned          merged_cols; /**< UCS_TABLE_ENTRY_SEPARATOR */
+        ucs_table_cells_t cells; /**< UCS_TABLE_ENTRY_ROW */
+    };
 } ucs_table_entry_t;
 
 
