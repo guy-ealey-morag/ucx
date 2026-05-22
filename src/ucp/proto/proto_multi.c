@@ -163,13 +163,23 @@ static ucp_lane_index_t ucp_proto_multi_filter_net_devices(
         ucp_proto_common_tl_perf_t *tl_perfs, int fixed_first_lane,
         ucp_lane_index_t *lanes)
 {
+    ucp_context_h context            = params->worker->context;
     ucp_lane_index_t num_max_bw_devs = 0;
     double max_bandwidth;
     ucp_lane_index_t i, lane, seed, num_filtered_lanes;
     ucp_lane_map_t lane_map;
     ucs_sys_device_t sys_dev;
     ucs_sys_device_t sys_devs[UCP_PROTO_MAX_LANES];
+    /* Representative lane index for each entry of sys_devs[], used only to
+     * produce readable trace logs of which device the filter ended up
+     * picking. */
+    ucp_lane_index_t sys_dev_lanes[UCP_PROTO_MAX_LANES];
     const uct_tl_resource_desc_t *tl_rsc;
+
+    ucs_trace("single-net-device filter: proto %s node_local_id %lu "
+              "in_num_lanes %u fixed_first_lane %d",
+              ucp_proto_id_field(params->proto_id, name),
+              context->config.node_local_id, num_lanes, fixed_first_lane);
 
     for (lane_map = 0, max_bandwidth = 0, i = 0; i < num_lanes; ++i) {
         lane = lanes[i];
@@ -179,6 +189,21 @@ static ucp_lane_index_t ucp_proto_multi_filter_net_devices(
 
         lane_map     |= UCS_BIT(lane);
         max_bandwidth = ucs_max(max_bandwidth, tl_perfs[lane].bandwidth);
+    }
+
+    ucs_trace("single-net-device filter: net lane_map 0x%" PRIx64
+              " max_bandwidth " UCP_PROTO_PERF_FUNC_BW_FMT " MB/s",
+              (uint64_t)lane_map, max_bandwidth / UCS_MBYTE);
+
+    ucs_for_each_bit(lane, lane_map) {
+        ucs_trace("single-net-device filter:   " UCP_PROTO_LANE_FMT
+                  " sys_dev %d%s",
+                  UCP_PROTO_LANE_ARG(params, lane, &tl_perfs[lane]),
+                  ucp_proto_common_get_sys_dev(params, lane),
+                  ucp_proto_common_bandwidth_equal(tl_perfs[lane].bandwidth,
+                                                   max_bandwidth) ?
+                          " [at max]" :
+                          "");
     }
 
     ucs_for_each_bit(lane, lane_map) {
@@ -195,27 +220,53 @@ static ucp_lane_index_t ucp_proto_multi_filter_net_devices(
         }
 
         if (i == num_max_bw_devs) {
-            sys_devs[num_max_bw_devs++] = sys_dev;
+            sys_dev_lanes[num_max_bw_devs] = lane;
+            sys_devs[num_max_bw_devs++]    = sys_dev;
         }
     }
 
     if (num_max_bw_devs == 0) {
+        ucs_trace("single-net-device filter: no net devices at max bw, "
+                  "keeping all %u lanes",
+                  num_lanes);
         return num_lanes;
     }
 
-    seed = params->worker->context->config.node_local_id % num_max_bw_devs;
+    for (i = 0; i < num_max_bw_devs; ++i) {
+        ucs_trace("single-net-device filter:   sys_devs[%u] = sys_dev %d "
+                  "(" UCP_PROTO_LANE_FMT ")",
+                  i, sys_devs[i],
+                  UCP_PROTO_LANE_ARG(params, sys_dev_lanes[i],
+                                     &tl_perfs[sys_dev_lanes[i]]));
+    }
+
+    seed = context->config.node_local_id % num_max_bw_devs;
+
+    ucs_trace("single-net-device filter: pick node_local_id %lu %% "
+              "num_max_bw_devs %u = seed %u -> sys_dev %d (" UCP_PROTO_LANE_FMT
+              ")",
+              context->config.node_local_id, num_max_bw_devs, seed,
+              sys_devs[seed],
+              UCP_PROTO_LANE_ARG(params, sys_dev_lanes[seed],
+                                 &tl_perfs[sys_dev_lanes[seed]]));
+
     for (i = !!fixed_first_lane, num_filtered_lanes = i; i < num_lanes; ++i) {
         lane   = lanes[i];
         tl_rsc = ucp_proto_common_get_tl_rsc(params, lane);
         if ((tl_rsc->dev_type == UCT_DEVICE_TYPE_NET) &&
             (tl_rsc->sys_device != sys_devs[seed])) {
             ucp_proto_perf_node_deref(&tl_perfs[lane].node);
-            ucs_trace("filtered out " UCP_PROTO_LANE_FMT,
+            ucs_trace("single-net-device filter: drop " UCP_PROTO_LANE_FMT,
                       UCP_PROTO_LANE_ARG(params, lane, &tl_perfs[lane]));
         } else {
+            ucs_trace("single-net-device filter: keep " UCP_PROTO_LANE_FMT,
+                      UCP_PROTO_LANE_ARG(params, lane, &tl_perfs[lane]));
             lanes[num_filtered_lanes++] = lane;
         }
     }
+
+    ucs_trace("single-net-device filter: kept %u/%u lanes", num_filtered_lanes,
+              num_lanes);
 
     return num_filtered_lanes;
 }
