@@ -1165,3 +1165,54 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_twins_get_inline_0,
 
 UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_proto_mock_rcx_twins_get_inline_0, rcx,
                               "rc_x")
+
+/*
+ * Regression coverage for the SINGLE_NET_DEVICE modulo wrap-around:
+ * with two identical-bandwidth net devices (mock_0:1 + mock_2:1) we
+ * exercise NODE_LOCAL_ID values 3, 4 and 5 to confirm the modulo cycles
+ * correctly above the existing 0..2 cases, and that the new
+ * sort-by-sys_device step keeps the chosen NIC deterministic at every
+ * LOCAL_ID. With sys_device 1 (mock_0:1) and sys_device 3 (mock_2:1)
+ * the sorted sys_devs[] is [1, 3]:
+ *   - LOCAL_ID=3 % 2 = seed 1 -> mock_2:1
+ *   - LOCAL_ID=4 % 2 = seed 0 -> mock_0:1
+ *   - LOCAL_ID=5 % 2 = seed 1 -> mock_2:1
+ */
+UCS_TEST_P(test_ucp_proto_mock_rcx_twins_tag, use_single_net_device_3,
+           "IB_NUM_PATHS?=2", "SINGLE_NET_DEVICE=y", "NODE_LOCAL_ID=3")
+{
+    check_config(
+            {{0, 200, "eager short", "rc_mlx5/mock_0:1/path0"},
+             {201, 404, "eager copy-in copy-out", "rc_mlx5/mock_0:1/path0"},
+             {405, 8246, "eager zero-copy copy-out", "rc_mlx5/mock_0:1/path0"},
+             {8247, 18542, "multi-frag eager zero-copy copy-out",
+              "rc_mlx5/mock_0:1/path0"},
+             {18543, INF, "rendezvous zero-copy read from remote",
+              "rc_mlx5/mock_2:1 50% on path0 and 50% on path1"}});
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_twins_tag, use_single_net_device_4,
+           "IB_NUM_PATHS?=2", "SINGLE_NET_DEVICE=y", "NODE_LOCAL_ID=4")
+{
+    check_config(
+            {{0, 200, "eager short", "rc_mlx5/mock_0:1/path0"},
+             {201, 404, "eager copy-in copy-out", "rc_mlx5/mock_0:1/path0"},
+             {405, 8246, "eager zero-copy copy-out", "rc_mlx5/mock_0:1/path0"},
+             {8247, 18542, "multi-frag eager zero-copy copy-out",
+              "rc_mlx5/mock_0:1/path0"},
+             {18543, INF, "rendezvous zero-copy read from remote",
+              "rc_mlx5/mock_0:1 50% on path0 and 50% on path1"}});
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_twins_tag, use_single_net_device_5,
+           "IB_NUM_PATHS?=2", "SINGLE_NET_DEVICE=y", "NODE_LOCAL_ID=5")
+{
+    check_config(
+            {{0, 200, "eager short", "rc_mlx5/mock_0:1/path0"},
+             {201, 404, "eager copy-in copy-out", "rc_mlx5/mock_0:1/path0"},
+             {405, 8246, "eager zero-copy copy-out", "rc_mlx5/mock_0:1/path0"},
+             {8247, 18542, "multi-frag eager zero-copy copy-out",
+              "rc_mlx5/mock_0:1/path0"},
+             {18543, INF, "rendezvous zero-copy read from remote",
+              "rc_mlx5/mock_2:1 50% on path0 and 50% on path1"}});
+}

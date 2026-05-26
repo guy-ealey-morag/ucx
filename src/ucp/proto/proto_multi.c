@@ -16,8 +16,10 @@
 #include "proto_debug.h"
 #include "proto_multi.inl"
 
+#include <ucs/algorithm/qsort_r.h>
 #include <ucs/debug/assert.h>
 #include <ucs/debug/log.h>
+#include <ucs/sys/topo/base/topo.h>
 
 
 static UCS_F_ALWAYS_INLINE double
@@ -158,22 +160,62 @@ static ucp_sys_dev_map_t ucp_proto_multi_init_flush_sys_dev_mask(
     return UCS_BIT(key->sys_dev);
 }
 
+/* Unique (sys_device, representative-lane) pair used by the single-net-device
+ * filter. The lane field is kept only so the trace output can refer back to
+ * one of the lanes that introduced this sys_device. */
+typedef struct {
+    ucs_sys_device_t sys_dev;
+    ucp_lane_index_t lane;
+} ucp_proto_multi_net_dev_t;
+
+static int ucp_proto_multi_net_dev_cmp(const void *pa, const void *pb,
+                                       void *UCS_V_UNUSED arg)
+{
+    const ucp_proto_multi_net_dev_t *a = pa;
+    const ucp_proto_multi_net_dev_t *b = pb;
+
+    /* Ascending sys_device. Both values are uint8_t so the subtraction is
+     * safe in 'int'. */
+    return (int)a->sys_dev - (int)b->sys_dev;
+}
+
+/* Build a topology-distance proxy from a lane's already-computed
+ * performance entry, so the single-net-device filter can compare lanes
+ * with ucs_topo_distance_cmp() without doing a fresh topology lookup.
+ *
+ * - sys_latency is the accumulated topology-distance latency that
+ *   ucp_proto_common_get_lane_perf() added via update_lane_perf_by_distance().
+ * - bandwidth is the iface BW already min-clamped by the same distance.
+ *
+ * Note: tl_perf->latency (network/iface latency + protocol overhead) is
+ * uniform across lanes of the same TL and would NOT discriminate, so it is
+ * intentionally not used here. */
+static UCS_F_ALWAYS_INLINE ucs_sys_dev_distance_t
+ucp_proto_multi_lane_distance(const ucp_proto_common_tl_perf_t *tl_perf)
+{
+    ucs_sys_dev_distance_t d;
+
+    d.latency   = tl_perf->sys_latency;
+    d.bandwidth = tl_perf->bandwidth;
+    return d;
+}
+
 static ucp_lane_index_t ucp_proto_multi_filter_net_devices(
         ucp_lane_index_t num_lanes, const ucp_proto_init_params_t *params,
         ucp_proto_common_tl_perf_t *tl_perfs, int fixed_first_lane,
         ucp_lane_index_t *lanes)
 {
-    ucp_context_h context            = params->worker->context;
-    ucp_lane_index_t num_max_bw_devs = 0;
-    double max_bandwidth;
+    ucp_context_h context               = params->worker->context;
+    ucp_lane_index_t num_min_dist_devs  = 0;
+    int min_initialized                 = 0;
+    /* Initialized to {0} only to silence -Wmaybe-uninitialized; the value is
+     * never read until min_initialized becomes non-zero. */
+    ucs_sys_dev_distance_t min_distance = {0};
+    ucs_sys_dev_distance_t lane_dist;
+    ucp_proto_multi_net_dev_t sys_devs[UCP_PROTO_MAX_LANES];
     ucp_lane_index_t i, lane, seed, num_filtered_lanes;
     ucp_lane_map_t lane_map;
     ucs_sys_device_t sys_dev;
-    ucs_sys_device_t sys_devs[UCP_PROTO_MAX_LANES];
-    /* Representative lane index for each entry of sys_devs[], used only to
-     * produce readable trace logs of which device the filter ended up
-     * picking. */
-    ucp_lane_index_t sys_dev_lanes[UCP_PROTO_MAX_LANES];
     const uct_tl_resource_desc_t *tl_rsc;
 
     ucs_trace("single-net-device filter: proto %s node_local_id %lu "
@@ -181,80 +223,103 @@ static ucp_lane_index_t ucp_proto_multi_filter_net_devices(
               ucp_proto_id_field(params->proto_id, name),
               context->config.node_local_id, num_lanes, fixed_first_lane);
 
-    for (lane_map = 0, max_bandwidth = 0, i = 0; i < num_lanes; ++i) {
+    /* Pass 1: find all net devices and track the minimum
+     * (sys_latency, bandwidth) "distance" already computed by get_lane_perf. */
+    lane_map = 0;
+    for (i = 0; i < num_lanes; ++i) {
         lane = lanes[i];
         if (!ucp_proto_common_is_net_dev(params, lane)) {
             continue;
         }
 
-        lane_map     |= UCS_BIT(lane);
-        max_bandwidth = ucs_max(max_bandwidth, tl_perfs[lane].bandwidth);
+        lane_map |= UCS_BIT(lane);
+        lane_dist = ucp_proto_multi_lane_distance(&tl_perfs[lane]);
+        if (!min_initialized ||
+            (ucs_topo_distance_cmp(&lane_dist, &min_distance) < 0)) {
+            min_distance    = lane_dist;
+            min_initialized = 1;
+        }
     }
 
     ucs_trace("single-net-device filter: net lane_map 0x%" PRIx64
-              " max_bandwidth " UCP_PROTO_PERF_FUNC_BW_FMT " MB/s",
-              (uint64_t)lane_map, max_bandwidth / UCS_MBYTE);
+              " min_distance lat %.2f ns bw " UCP_PROTO_PERF_FUNC_BW_FMT
+              " MB/s",
+              (uint64_t)lane_map, min_distance.latency * 1e9,
+              min_distance.bandwidth / UCS_MBYTE);
 
     ucs_for_each_bit(lane, lane_map) {
+        lane_dist = ucp_proto_multi_lane_distance(&tl_perfs[lane]);
         ucs_trace("single-net-device filter:   " UCP_PROTO_LANE_FMT
-                  " sys_dev %d%s",
+                  " sys_dev %d distance lat %.2f ns "
+                  "bw " UCP_PROTO_PERF_FUNC_BW_FMT " MB/s%s",
                   UCP_PROTO_LANE_ARG(params, lane, &tl_perfs[lane]),
                   ucp_proto_common_get_sys_dev(params, lane),
-                  ucp_proto_common_bandwidth_equal(tl_perfs[lane].bandwidth,
-                                                   max_bandwidth) ?
-                          " [at max]" :
+                  lane_dist.latency * 1e9, lane_dist.bandwidth / UCS_MBYTE,
+                  (ucs_topo_distance_cmp(&lane_dist, &min_distance) == 0) ?
+                          " [at min]" :
                           "");
     }
 
+    /* Pass 2: collect unique sys_devices for lanes at min distance. */
     ucs_for_each_bit(lane, lane_map) {
-        if (!ucp_proto_common_bandwidth_equal(tl_perfs[lane].bandwidth,
-                                              max_bandwidth)) {
+        lane_dist = ucp_proto_multi_lane_distance(&tl_perfs[lane]);
+        if (ucs_topo_distance_cmp(&lane_dist, &min_distance) != 0) {
             continue;
         }
 
         sys_dev = ucp_proto_common_get_sys_dev(params, lane);
-        for (i = 0; i < num_max_bw_devs; ++i) {
-            if (sys_dev == sys_devs[i]) {
+        for (i = 0; i < num_min_dist_devs; ++i) {
+            if (sys_dev == sys_devs[i].sys_dev) {
                 break;
             }
         }
 
-        if (i == num_max_bw_devs) {
-            sys_dev_lanes[num_max_bw_devs] = lane;
-            sys_devs[num_max_bw_devs++]    = sys_dev;
+        if (i == num_min_dist_devs) {
+            sys_devs[num_min_dist_devs].sys_dev = sys_dev;
+            sys_devs[num_min_dist_devs].lane    = lane;
+            ++num_min_dist_devs;
         }
     }
 
-    if (num_max_bw_devs == 0) {
-        ucs_trace("single-net-device filter: no net devices at max bw, "
+    if (num_min_dist_devs == 0) {
+        ucs_trace("single-net-device filter: no net devices at min distance, "
                   "keeping all %u lanes",
                   num_lanes);
         return num_lanes;
     }
 
-    for (i = 0; i < num_max_bw_devs; ++i) {
+    /* Sort by sys_device ascending so every rank on the node observes the same
+     * sys_devs[] ordering. Without this, each rank's wireup-determined lane
+     * order would rotate sys_devs[] so its own GPU-paired NIC sits at
+     * sys_devs[0], which causes node_local_id % num_min_dist_devs to alias
+     * onto different physical NICs per rank. */
+    ucs_qsort_r(sys_devs, num_min_dist_devs, sizeof(sys_devs[0]),
+                ucp_proto_multi_net_dev_cmp, NULL);
+
+    for (i = 0; i < num_min_dist_devs; ++i) {
         ucs_trace("single-net-device filter:   sys_devs[%u] = sys_dev %d "
                   "(" UCP_PROTO_LANE_FMT ")",
-                  i, sys_devs[i],
-                  UCP_PROTO_LANE_ARG(params, sys_dev_lanes[i],
-                                     &tl_perfs[sys_dev_lanes[i]]));
+                  i, sys_devs[i].sys_dev,
+                  UCP_PROTO_LANE_ARG(params, sys_devs[i].lane,
+                                     &tl_perfs[sys_devs[i].lane]));
     }
 
-    seed = context->config.node_local_id % num_max_bw_devs;
+    seed = context->config.node_local_id % num_min_dist_devs;
 
     ucs_trace("single-net-device filter: pick node_local_id %lu %% "
-              "num_max_bw_devs %u = seed %u -> sys_dev %d (" UCP_PROTO_LANE_FMT
-              ")",
-              context->config.node_local_id, num_max_bw_devs, seed,
-              sys_devs[seed],
-              UCP_PROTO_LANE_ARG(params, sys_dev_lanes[seed],
-                                 &tl_perfs[sys_dev_lanes[seed]]));
+              "num_min_dist_devs %u = seed %u -> sys_dev %d "
+              "(" UCP_PROTO_LANE_FMT ")",
+              context->config.node_local_id, num_min_dist_devs, seed,
+              sys_devs[seed].sys_dev,
+              UCP_PROTO_LANE_ARG(params, sys_devs[seed].lane,
+                                 &tl_perfs[sys_devs[seed].lane]));
 
+    /* Pass 3: drop net lanes not on sys_devs[seed]. Non-net lanes are kept. */
     for (i = !!fixed_first_lane, num_filtered_lanes = i; i < num_lanes; ++i) {
         lane   = lanes[i];
         tl_rsc = ucp_proto_common_get_tl_rsc(params, lane);
         if ((tl_rsc->dev_type == UCT_DEVICE_TYPE_NET) &&
-            (tl_rsc->sys_device != sys_devs[seed])) {
+            (tl_rsc->sys_device != sys_devs[seed].sys_dev)) {
             ucp_proto_perf_node_deref(&tl_perfs[lane].node);
             ucs_trace("single-net-device filter: drop " UCP_PROTO_LANE_FMT,
                       UCP_PROTO_LANE_ARG(params, lane, &tl_perfs[lane]));
