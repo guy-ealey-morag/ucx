@@ -8,6 +8,7 @@
 
 extern "C" {
 #include <ucp/core/ucp_ep.inl>
+#include <ucp/core/ucp_mm.h>
 #include <ucp/core/ucp_types.h>
 #include <uct/base/uct_iface.h>
 #include <ucp/proto/proto_debug.h>
@@ -1259,3 +1260,160 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_trio_unsorted,
 
 UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_proto_mock_rcx_trio_unsorted, rcx,
                               "rc_x")
+
+/*
+ * Coverage for the min-distance filter step in
+ * ucp_proto_multi_filter_single_net_device(): when the topology provider
+ * reports per-device distances, only the NICs whose sys_device is at the
+ * minimum distance from the local memory's sys_device should survive the
+ * filter, and the deterministic sort then makes the node_local_id seed
+ * pick the same NIC on every rank sharing that minimum-distance set.
+ *
+ * Reuses the three mock NICs from the parent fixture (sys_devs 1, 2, 3)
+ * and installs a "proto_mock" topology provider that reports a non-zero
+ * latency for sys_devs whose absolute index delta is not 1. The local
+ * memory's sys_dev is forced to 2, so:
+ *   distance(2, mock_0:1=1) -> latency 0   (adjacent)
+ *   distance(2, mock_1:1=2) -> latency 100ns (delta 0, "far")
+ *   distance(2, mock_2:1=3) -> latency 0   (adjacent)
+ *
+ * mock_0:1 and mock_2:1 survive; mock_1:1 is excluded even though it
+ * would otherwise win the wireup AM-lane race on iface latency. The
+ * sorted seed table is [1, 3], so:
+ *   local_id=0 -> sys_devs[0]=1 -> mock_0:1
+ *   local_id=1 -> sys_devs[1]=3 -> mock_2:1
+ *   local_id=2 -> sys_devs[0]=1 -> mock_0:1 (wraps)
+ */
+class test_ucp_proto_mock_rcx_trio_local_distance_get :
+    public test_ucp_proto_mock_rcx_trio_unsorted {
+public:
+    test_ucp_proto_mock_rcx_trio_local_distance_get() :
+        m_topo_provider_added(false)
+    {
+    }
+
+    virtual void init() override
+    {
+        test_ucp_proto_mock_rcx_trio_unsorted::init();
+        ucs_list_add_head(&ucs_sys_topo_providers_list, &m_topo_provider.list);
+        m_topo_provider_added = true;
+        modify_config("TOPO_PRIO", "proto_mock");
+        ucs_sys_topo_reset_provider();
+    }
+
+    virtual void cleanup() override
+    {
+        if (m_topo_provider_added) {
+            modify_config("TOPO_PRIO", "default");
+            ucs_sys_topo_reset_provider();
+            ucs_list_del(&m_topo_provider.list);
+            m_topo_provider_added = false;
+        }
+        test_ucp_proto_mock_rcx_trio_unsorted::cleanup();
+    }
+
+protected:
+    void check_get_picks(const std::string &expected_mock)
+    {
+        uint8_t remote   = 42;
+        auto memh        = mem_map(receiver(), &remote, sizeof(remote));
+        auto rkey_packed = rkey_pack(receiver(), memh);
+        auto rkey        = rkey_unpack(sender().ep(), rkey_packed);
+
+        uint8_t local   = 0;
+        auto local_memh = mem_map(sender(), &local, sizeof(local));
+
+        /* mock_0:1 (sys_dev=1) and mock_2:1 (sys_dev=3) are adjacent to
+         * sys_dev=2, so they are the closest to the local memory. */
+        local_memh->sys_dev = 2;
+
+        ucp_request_param_t req_param;
+        req_param.op_attr_mask = UCP_OP_ATTR_FIELD_MEMH;
+        req_param.memh         = local_memh;
+
+        auto status = ucp_get_nbx(sender().ep(), &local, sizeof(local),
+                                  (uint64_t)&remote, rkey, &req_param);
+        request_wait(status);
+        ASSERT_EQ(local, 42);
+
+        ucp_proto_select_key_t key = any_key();
+        key.param.op_id_flags      = UCP_OP_ID_GET;
+        key.param.op_attr          = 0;
+
+        const std::string config = "rc_mlx5/" + expected_mock + "/path0";
+        check_rkey_config(sender(), {{1, INF, "zero-copy", config}}, key,
+                          rkey->cfg_index);
+    }
+
+    /* Layout-compatible analog of ucs_sys_topo_provider_t (which is
+     * private to src/ucs/sys/topo/base/topo.c). */
+    struct topo_provider {
+        const char *name;
+        struct {
+            ucs_topo_get_distance_func_t get_distance;
+            void (*get_memory_distance)(ucs_sys_device_t,
+                                        ucs_sys_dev_distance_t*);
+        } ops;
+        ucs_list_link_t list;
+    };
+
+    static ucs_status_t get_distance(ucs_sys_device_t device1,
+                                     ucs_sys_device_t device2,
+                                     ucs_sys_dev_distance_t *distance)
+    {
+        *distance = ucs_topo_default_distance;
+        if ((device1 != UCS_SYS_DEVICE_ID_UNKNOWN) &&
+            (device2 != UCS_SYS_DEVICE_ID_UNKNOWN) &&
+            (sys_dev_delta(device1, device2) != 1)) {
+            distance->latency = 100e-9;
+        }
+        return UCS_OK;
+    }
+
+    static void
+    get_memory_distance(ucs_sys_device_t, ucs_sys_dev_distance_t *distance)
+    {
+        *distance = ucs_topo_default_distance;
+    }
+
+private:
+    static unsigned
+    sys_dev_delta(ucs_sys_device_t device1, ucs_sys_device_t device2)
+    {
+        return (device1 > device2) ? (device1 - device2) : (device2 - device1);
+    }
+
+    static topo_provider m_topo_provider;
+    bool m_topo_provider_added;
+};
+
+test_ucp_proto_mock_rcx_trio_local_distance_get::topo_provider
+        test_ucp_proto_mock_rcx_trio_local_distance_get::m_topo_provider =
+                {"proto_mock", {get_distance, get_memory_distance}, {}};
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_trio_local_distance_get,
+           single_net_dev_local_id_0_picks_lowest_adjacent_sys_dev,
+           "IB_NUM_PATHS?=2", "SINGLE_NET_DEVICE=y", "NODE_LOCAL_ID=0",
+           "ZCOPY_THRESH=0")
+{
+    check_get_picks("mock_0:1");
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_trio_local_distance_get,
+           single_net_dev_local_id_1_picks_highest_adjacent_sys_dev,
+           "IB_NUM_PATHS?=2", "SINGLE_NET_DEVICE=y", "NODE_LOCAL_ID=1",
+           "ZCOPY_THRESH=0")
+{
+    check_get_picks("mock_2:1");
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_trio_local_distance_get,
+           single_net_dev_local_id_2_wraps_to_lowest_adjacent_sys_dev,
+           "IB_NUM_PATHS?=2", "SINGLE_NET_DEVICE=y", "NODE_LOCAL_ID=2",
+           "ZCOPY_THRESH=0")
+{
+    check_get_picks("mock_0:1");
+}
+
+UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_proto_mock_rcx_trio_local_distance_get,
+                              rcx, "rc_x")
