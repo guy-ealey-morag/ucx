@@ -157,10 +157,10 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
     ucp_context_h context         = worker->context;
     ucs_string_buffer_t strb      = UCS_STRING_BUFFER_INITIALIZER;
     const ucs_table_config_t tcfg = {
-        .n_body_cols = UCP_EP_LANE_INFO_NUM_COLS
+        .n_cols = UCP_EP_LANE_INFO_NUM_COLS
     };
     ucs_table_t table;
-    ucs_table_row_t *row;
+    ucs_table_row_h row;
     ucp_lane_index_t lane, j;
     ucp_lane_type_mask_t types_union;
     const char *tl_name, *dev_name, *ep_type;
@@ -194,19 +194,19 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
 
     /* Title spans all body columns. */
     row = ucs_table_add_row(&table);
-    ucs_table_row_add_cell_fmt(row, UCP_EP_LANE_INFO_NUM_COLS,
+    ucs_table_row_add_cell_fmt(&table, row, UCP_EP_LANE_INFO_NUM_COLS,
                                UCS_TABLE_ALIGN_LEFT, "%s", title_buf);
     ucs_table_add_separator(&table);
 
     /* Column headers. */
     row = ucs_table_add_row(&table);
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+    ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                UCP_EP_LANE_INFO_HDR_TL);
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+    ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                UCP_EP_LANE_INFO_HDR_DEV);
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+    ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                UCP_EP_LANE_INFO_HDR_COUNT);
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+    ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                UCP_EP_LANE_INFO_HDR_TYPES);
     ucs_table_add_separator(&table);
 
@@ -239,11 +239,13 @@ void ucp_wireup_log_ep_lanes(ucp_worker_h worker,
         ucp_wireup_format_lane_types(types_union, types_buf, sizeof(types_buf));
 
         row = ucs_table_add_row(&table);
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+        ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                    first_tl ? tl_name : "");
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", dev_buf);
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%d", count);
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+        ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                                   dev_buf);
+        ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%d",
+                                   count);
+        ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                    types_buf);
 
         printed_any = 1;

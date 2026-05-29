@@ -121,6 +121,7 @@ noinst_HEADERS = \
 	debug/debug_int.h \
 	debug/log.h \
 	debug/memtrack_int.h \
+	debug/table.h \
 	memory/numa.h \
 	memory/rcache_int.h \
 	memory/rcache.inl \

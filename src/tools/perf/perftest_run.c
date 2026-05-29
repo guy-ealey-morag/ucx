@@ -114,7 +114,7 @@ static void perftest_add_meta_rows(ucs_table_t *table,
     const char *test_api_str;
     const char *test_data_str;
     char mem_dev_str[16];
-    ucs_table_row_t *row;
+    ucs_table_row_h row;
 
     if (test->api == UCX_PERF_API_UCT) {
         test_api_str = "transport layer";
@@ -142,32 +142,34 @@ static void perftest_add_meta_rows(ucs_table_t *table,
     }
 
     row = ucs_table_add_row(table);
-    ucs_table_row_add_cell_fmt(row, col_span, UCS_TABLE_ALIGN_LEFT,
+    ucs_table_row_add_cell_fmt(table, row, col_span, UCS_TABLE_ALIGN_LEFT,
                                meta_row_fmt_s, "API:", test_api_str);
 
     row = ucs_table_add_row(table);
-    ucs_table_row_add_cell_fmt(row, col_span, UCS_TABLE_ALIGN_LEFT,
+    ucs_table_row_add_cell_fmt(table, row, col_span, UCS_TABLE_ALIGN_LEFT,
                                meta_row_fmt_s, "Test:", test->desc);
 
     row = ucs_table_add_row(table);
-    ucs_table_row_add_cell_fmt(row, col_span, UCS_TABLE_ALIGN_LEFT,
+    ucs_table_row_add_cell_fmt(table, row, col_span, UCS_TABLE_ALIGN_LEFT,
                                meta_row_fmt_s, "Data layout:", test_data_str);
 
     row = ucs_table_add_row(table);
     ucs_table_row_add_cell_fmt(
-            row, col_span, UCS_TABLE_ALIGN_LEFT, meta_row_fmt_s, "Send memory:",
+            table, row, col_span, UCS_TABLE_ALIGN_LEFT, meta_row_fmt_s,
+            "Send memory:",
             ucs_memory_type_names[ctx->params.super.send_mem_type]);
 
     row = ucs_table_add_row(table);
     ucs_table_row_add_cell_fmt(
-            row, col_span, UCS_TABLE_ALIGN_LEFT, meta_row_fmt_s, "Recv memory:",
+            table, row, col_span, UCS_TABLE_ALIGN_LEFT, meta_row_fmt_s,
+            "Recv memory:",
             ucs_memory_type_names[ctx->params.super.recv_mem_type]);
 
     if (ctx->params.super.send_device.mem_type != UCS_MEMORY_TYPE_LAST) {
         get_accel_device_str(&ctx->params.super.send_device, mem_dev_str,
                              sizeof(mem_dev_str));
         row = ucs_table_add_row(table);
-        ucs_table_row_add_cell_fmt(row, col_span, UCS_TABLE_ALIGN_LEFT,
+        ucs_table_row_add_cell_fmt(table, row, col_span, UCS_TABLE_ALIGN_LEFT,
                                    meta_row_fmt_s, "Send device:", mem_dev_str);
     }
 
@@ -175,23 +177,23 @@ static void perftest_add_meta_rows(ucs_table_t *table,
         get_accel_device_str(&ctx->params.super.recv_device, mem_dev_str,
                              sizeof(mem_dev_str));
         row = ucs_table_add_row(table);
-        ucs_table_row_add_cell_fmt(row, col_span, UCS_TABLE_ALIGN_LEFT,
+        ucs_table_row_add_cell_fmt(table, row, col_span, UCS_TABLE_ALIGN_LEFT,
                                    meta_row_fmt_s, "Recv device:", mem_dev_str);
     }
 
     row = ucs_table_add_row(table);
-    ucs_table_row_add_cell_fmt(row, col_span, UCS_TABLE_ALIGN_LEFT,
+    ucs_table_row_add_cell_fmt(table, row, col_span, UCS_TABLE_ALIGN_LEFT,
                                meta_row_fmt_zu, "Message size:",
                                ucx_perf_get_message_size(&ctx->params.super));
 
     row = ucs_table_add_row(table);
-    ucs_table_row_add_cell_fmt(row, col_span, UCS_TABLE_ALIGN_LEFT,
+    ucs_table_row_add_cell_fmt(table, row, col_span, UCS_TABLE_ALIGN_LEFT,
                                meta_row_fmt_u, "Window size:",
                                ctx->params.super.max_outstanding);
 
     if ((test->api == UCX_PERF_API_UCP) && (test->command == UCX_PERF_CMD_AM)) {
         row = ucs_table_add_row(table);
-        ucs_table_row_add_cell_fmt(row, col_span, UCS_TABLE_ALIGN_LEFT,
+        ucs_table_row_add_cell_fmt(table, row, col_span, UCS_TABLE_ALIGN_LEFT,
                                    meta_row_fmt_zu, "AM header size:",
                                    ctx->params.super.ucp.am_hdr_size);
     }
@@ -238,14 +240,14 @@ static void perftest_results_table_open(struct perftest_context *ctx,
     ucs_table_config_t cfg = {};
     unsigned min_widths[PERFTEST_RESULTS_N_COLS];
     const char *overhead_lat_str;
-    ucs_table_row_t *row;
+    ucs_table_row_h row;
     unsigned i;
 
     if (!has_meta && !has_headers) {
         return;
     }
 
-    cfg.n_body_cols = has_headers ? PERFTEST_RESULTS_N_COLS : 1;
+    cfg.n_cols = has_headers ? PERFTEST_RESULTS_N_COLS : 1;
 
     if (has_headers) {
         memcpy(min_widths, results_col_widths, sizeof(min_widths));
@@ -262,7 +264,7 @@ static void perftest_results_table_open(struct perftest_context *ctx,
     ucs_table_init(&ctx->results_table, &cfg);
 
     if (has_meta) {
-        perftest_add_meta_rows(&ctx->results_table, ctx, test, cfg.n_body_cols);
+        perftest_add_meta_rows(&ctx->results_table, ctx, test, cfg.n_cols);
     }
 
     if (has_headers) {
@@ -279,29 +281,39 @@ static void perftest_results_table_open(struct perftest_context *ctx,
          *                    bandwidth span 2 | msgrate span 2.
          * Labels centered over their column groups. */
         row = ucs_table_add_row(&ctx->results_table);
-        ucs_table_row_add_cell(row, 2, UCS_TABLE_ALIGN_LEFT);
-        ucs_table_row_add_cell_fmt(row, 3, UCS_TABLE_ALIGN_CENTER, "%s (usec)",
+        ucs_table_row_add_cell_empty(&ctx->results_table, row, 2);
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 3,
+                                   UCS_TABLE_ALIGN_CENTER, "%s (usec)",
                                    overhead_lat_str);
-        ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_CENTER,
-                                   "bandwidth (MB/s)");
-        ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_CENTER,
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 2,
+                                   UCS_TABLE_ALIGN_CENTER, "bandwidth (MB/s)");
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 2,
+                                   UCS_TABLE_ALIGN_CENTER,
                                    "message rate (msg/s)");
         ucs_table_add_separator(&ctx->results_table);
 
         /* Bottom header: 9 cells, all centered over their columns. */
         row = ucs_table_add_row(&ctx->results_table);
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%s",
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 1,
+                                   UCS_TABLE_ALIGN_CENTER, "%s",
                                    is_final ? "Test" : "Stage");
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER,
-                                   "# iterations");
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "%.1f%%ile",
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 1,
+                                   UCS_TABLE_ALIGN_CENTER, "# iterations");
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 1,
+                                   UCS_TABLE_ALIGN_CENTER, "%.1f%%ile",
                                    ctx->params.super.percentile_rank);
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "average");
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "overall");
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "average");
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "overall");
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "average");
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_CENTER, "overall");
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 1,
+                                   UCS_TABLE_ALIGN_CENTER, "average");
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 1,
+                                   UCS_TABLE_ALIGN_CENTER, "overall");
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 1,
+                                   UCS_TABLE_ALIGN_CENTER, "average");
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 1,
+                                   UCS_TABLE_ALIGN_CENTER, "overall");
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 1,
+                                   UCS_TABLE_ALIGN_CENTER, "average");
+        ucs_table_row_add_cell_fmt(&ctx->results_table, row, 1,
+                                   UCS_TABLE_ALIGN_CENTER, "overall");
     }
 
     ucs_table_print(&ctx->results_table);
@@ -367,7 +379,7 @@ void print_progress(void *UCS_V_UNUSED rte_group,
 {
     struct perftest_context *ctx = arg;
     unsigned ti                  = 0;
-    ucs_table_row_t *row;
+    ucs_table_stream_row_t *row;
     const char *fmt_int, *fmt_lat, *fmt_bw;
 
     /* Preserve today's early-return shape: skip non-final lines when the
@@ -441,10 +453,10 @@ void print_progress(void *UCS_V_UNUSED rte_group,
      * aggregated final summary from ucx_perf_thread_report_aggregated. */
     if (!final) {
 #if _OPENMP
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "[thread %d]",
-                                   omp_get_thread_num());
+        ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT,
+                                          "[thread %d]", omp_get_thread_num());
 #else
-        ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT); /* empty prefix */
+        ucs_table_stream_row_add_cell_empty(row, 1); /* empty prefix */
 #endif
     } else if (ctx->flags & TEST_FLAG_PRINT_FINAL) {
         /* FINAL mode: prefix carries the test name (or "Final:" when no
@@ -454,14 +466,18 @@ void print_progress(void *UCS_V_UNUSED rte_group,
             ucs_string_buffer_append_array(&name_buf, "/", "%s",
                                            ctx->test_names,
                                            ctx->num_batch_files);
-            ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
-                                       ucs_string_buffer_cstr(&name_buf));
+            ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT,
+                                              "%s",
+                                              ucs_string_buffer_cstr(
+                                                      &name_buf));
         } else {
-            ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "Final:");
+            ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT,
+                                              "Final:");
         }
     } else {
         /* final && !PRINT_FINAL: per-stage end-of-run summary line. */
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "Final:");
+        ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT,
+                                          "Final:");
     }
 
     /* Cells 1..8: data. Widths come from results_col_widths via %*, so
@@ -477,48 +493,51 @@ void print_progress(void *UCS_V_UNUSED rte_group,
          * are derived from the same results_col_widths array, so they
          * automatically match the merged-cell pixel widths of the table
          * (the bug today's hand-coded 29/22/23 widths exhibited). */
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_int,
-                                   (int)perftest_results_col_width(1, 1),
-                                   (double)result->iters);
-        ucs_table_row_add_cell_fmt(row, 3, UCS_TABLE_ALIGN_RIGHT, fmt_lat,
-                                   (int)perftest_results_col_width(2, 3),
-                                   result->latency.total_average * 1e6);
-        ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_RIGHT, fmt_bw,
-                                   (int)perftest_results_col_width(5, 2),
-                                   result->bandwidth.total_average /
-                                           (1024.0 * 1024.0));
-        ucs_table_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_RIGHT, fmt_int,
-                                   (int)perftest_results_col_width(7, 2),
-                                   result->msgrate.total_average);
+        ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT,
+                                          fmt_int,
+                                          (int)perftest_results_col_width(1, 1),
+                                          (double)result->iters);
+        ucs_table_stream_row_add_cell_fmt(row, 3, UCS_TABLE_ALIGN_RIGHT,
+                                          fmt_lat,
+                                          (int)perftest_results_col_width(2, 3),
+                                          result->latency.total_average * 1e6);
+        ucs_table_stream_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_RIGHT, fmt_bw,
+                                          (int)perftest_results_col_width(5, 2),
+                                          result->bandwidth.total_average /
+                                                  (1024.0 * 1024.0));
+        ucs_table_stream_row_add_cell_fmt(row, 2, UCS_TABLE_ALIGN_RIGHT,
+                                          fmt_int,
+                                          (int)perftest_results_col_width(7, 2),
+                                          result->msgrate.total_average);
     } else {
         /* Normal: 8 cells of col_span 1. iters + msgrate (avg, overall)
          * use fmt_int; the others are plain. */
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_int,
-                                   (int)results_col_widths[1],
-                                   (double)result->iters);
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_lat,
-                                   (int)results_col_widths[2],
-                                   result->latency.percentile * 1e6);
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_lat,
-                                   (int)results_col_widths[3],
-                                   result->latency.moment_average * 1e6);
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_lat,
-                                   (int)results_col_widths[4],
-                                   result->latency.total_average * 1e6);
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_bw,
-                                   (int)results_col_widths[5],
-                                   result->bandwidth.moment_average /
-                                           (1024.0 * 1024.0));
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_bw,
-                                   (int)results_col_widths[6],
-                                   result->bandwidth.total_average /
-                                           (1024.0 * 1024.0));
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_int,
-                                   (int)results_col_widths[7],
-                                   result->msgrate.moment_average);
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_int,
-                                   (int)results_col_widths[8],
-                                   result->msgrate.total_average);
+        ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT,
+                                          fmt_int, (int)results_col_widths[1],
+                                          (double)result->iters);
+        ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT,
+                                          fmt_lat, (int)results_col_widths[2],
+                                          result->latency.percentile * 1e6);
+        ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT,
+                                          fmt_lat, (int)results_col_widths[3],
+                                          result->latency.moment_average * 1e6);
+        ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT,
+                                          fmt_lat, (int)results_col_widths[4],
+                                          result->latency.total_average * 1e6);
+        ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_bw,
+                                          (int)results_col_widths[5],
+                                          result->bandwidth.moment_average /
+                                                  (1024.0 * 1024.0));
+        ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT, fmt_bw,
+                                          (int)results_col_widths[6],
+                                          result->bandwidth.total_average /
+                                                  (1024.0 * 1024.0));
+        ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT,
+                                          fmt_int, (int)results_col_widths[7],
+                                          result->msgrate.moment_average);
+        ucs_table_stream_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_RIGHT,
+                                          fmt_int, (int)results_col_widths[8],
+                                          result->msgrate.total_average);
     }
 
     if ((ctx->flags & TEST_FLAG_PRINT_EXTRA_INFO) && (extra_info != NULL)) {
@@ -681,16 +700,16 @@ static ucs_status_t run_test_recurs(struct perftest_context *ctx,
             !(ctx->flags & TEST_FLAG_PRINT_FINAL) &&
             (ctx->num_batch_files > 0)) {
             UCS_STRING_BUFFER_ONSTACK(name_buf, 256);
-            ucs_table_row_t *name_row = ctx->results_stream_rows[0];
+            ucs_table_stream_row_t *name_row = ctx->results_stream_rows[0];
 
             ucs_string_buffer_append_array(&name_buf, "/", "%s",
                                            ctx->test_names,
                                            ctx->num_batch_files);
             ucs_table_stream_row_reset(name_row);
-            ucs_table_row_add_cell_fmt(name_row,
-                                       /*col_span=*/PERFTEST_RESULTS_N_COLS,
-                                       UCS_TABLE_ALIGN_LEFT, "%s",
-                                       ucs_string_buffer_cstr(&name_buf));
+            ucs_table_stream_row_add_cell_fmt(
+                    name_row,
+                    /*col_span=*/PERFTEST_RESULTS_N_COLS, UCS_TABLE_ALIGN_LEFT,
+                    "%s", ucs_string_buffer_cstr(&name_buf));
             ucs_table_print_row(name_row);
             ucs_table_print_separator(&ctx->results_table);
         }

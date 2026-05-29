@@ -85,7 +85,7 @@ ucp_tl_info_cmpt_dev_type(const ucp_tl_info_entry_t *all_rscs,
  * that subsequent rows in the same group leave those columns blank. The
  * carry-over rendering above an inter-group separator is decided by the
  * `merged_cols` argument passed when the separator is created (see the
- * call sites of ucs_table_add_separator_with_merged_cells below).
+ * call sites of ucs_table_add_separator_with_merged_cols below).
  */
 static void ucp_tl_info_emit_row(ucs_table_t *table, const char *type_str,
                                  const char *cmpt_str, const char *tl_str,
@@ -93,26 +93,28 @@ static void ucp_tl_info_emit_row(ucs_table_t *table, const char *type_str,
                                  int *first_cmpt, int *first_tl,
                                  int *printed_any)
 {
-    ucs_table_row_t *row = ucs_table_add_row(table);
+    ucs_table_row_h row = ucs_table_add_row(table);
 
     if (*first_type) {
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+        ucs_table_row_add_cell_fmt(table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                    type_str);
     } else {
-        ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+        ucs_table_row_add_cell_empty(table, row, 1);
     }
     if (*first_cmpt) {
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+        ucs_table_row_add_cell_fmt(table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                    cmpt_str);
     } else {
-        ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+        ucs_table_row_add_cell_empty(table, row, 1);
     }
     if (*first_tl) {
-        ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", tl_str);
+        ucs_table_row_add_cell_fmt(table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                                   tl_str);
     } else {
-        ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+        ucs_table_row_add_cell_empty(table, row, 1);
     }
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s", dev_str);
+    ucs_table_row_add_cell_fmt(table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                               dev_str);
 
     *first_tl    = 0;
     *first_cmpt  = 0;
@@ -126,10 +128,10 @@ void ucp_context_log_tl_info(ucp_context_h context,
 {
     ucs_string_buffer_t strb      = UCS_STRING_BUFFER_INITIALIZER;
     const ucs_table_config_t tcfg = {
-        .n_body_cols = UCP_TL_INFO_NUM_COLS
+        .n_cols = UCP_TL_INFO_NUM_COLS
     };
     ucs_table_t table;
-    ucs_table_row_t *row;
+    ucs_table_row_h row;
     ucp_rsc_index_t cmpt_idx;
     uct_device_type_t dev_type, cmpt_dev_type;
     unsigned i, j;
@@ -157,19 +159,19 @@ void ucp_context_log_tl_info(ucp_context_h context,
 
     /* Title spans all body columns. */
     row = ucs_table_add_row(&table);
-    ucs_table_row_add_cell_fmt(row, UCP_TL_INFO_NUM_COLS, UCS_TABLE_ALIGN_LEFT,
-                               "%s", title_buf);
+    ucs_table_row_add_cell_fmt(&table, row, UCP_TL_INFO_NUM_COLS,
+                               UCS_TABLE_ALIGN_LEFT, "%s", title_buf);
     ucs_table_add_separator(&table);
 
     /* Column headers. */
     row = ucs_table_add_row(&table);
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+    ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                UCP_TL_INFO_HDR_TYPE);
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+    ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                UCP_TL_INFO_HDR_COMPONENT);
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+    ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                UCP_TL_INFO_HDR_TRANSPORT);
-    ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+    ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                                UCP_TL_INFO_HDR_DEVICE);
     ucs_table_add_separator(&table);
 
@@ -291,13 +293,13 @@ void ucp_context_log_tl_info(ucp_context_h context,
                     ucs_table_add_separator(&table);
                 }
                 row = ucs_table_add_row(&table);
-                ucs_table_row_add_cell_fmt(row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
-                                           UCP_TL_INFO_UNAVAILABLE);
+                ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT,
+                                           "%s", UCP_TL_INFO_UNAVAILABLE);
                 ucs_table_row_add_cell_fmt(
-                        row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                        &table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                         context->tl_cmpts[cmpt_idx].attr.name);
-                ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
-                ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+                ucs_table_row_add_cell_empty(&table, row, 1);
+                ucs_table_row_add_cell_empty(&table, row, 1);
                 first_unavail = 0;
             } else {
                 /* "type" column on the row below stays empty; carry
@@ -306,12 +308,12 @@ void ucp_context_log_tl_info(ucp_context_h context,
                  * empty type cell instead of a dashed "+---". */
                 ucs_table_add_separator_with_merged_cols(&table, 1);
                 row = ucs_table_add_row(&table);
-                ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+                ucs_table_row_add_cell_empty(&table, row, 1);
                 ucs_table_row_add_cell_fmt(
-                        row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
+                        &table, row, 1, UCS_TABLE_ALIGN_LEFT, "%s",
                         context->tl_cmpts[cmpt_idx].attr.name);
-                ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
-                ucs_table_row_add_cell(row, 1, UCS_TABLE_ALIGN_LEFT);
+                ucs_table_row_add_cell_empty(&table, row, 1);
+                ucs_table_row_add_cell_empty(&table, row, 1);
             }
             printed_any = 1;
         }

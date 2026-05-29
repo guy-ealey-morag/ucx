@@ -65,7 +65,7 @@ struct perftest_context {
      * from multiple threads in MT mode. results_stream_rows == NULL is
      * the "table closed" sentinel. */
     ucs_table_t                  results_table;
-    ucs_table_row_t              **results_stream_rows;
+    ucs_table_stream_row_t       **results_stream_rows;
     unsigned                     n_stream_rows;
 
     /* Precomputed in run_test from a pre-walk of all batch files: the
