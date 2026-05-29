@@ -30,7 +30,7 @@ struct ucs_table_stream_row {
 
 void ucs_table_init(ucs_table_t *table, const ucs_table_config_t *config)
 {
-    unsigned *owned_min_widths;
+    unsigned *min_widths;
 
     ucs_assertv(config->n_cols > 0,
                 "number of columns must be positive (n_cols: %u)",
@@ -47,17 +47,15 @@ void ucs_table_init(ucs_table_t *table, const ucs_table_config_t *config)
     }
 
     if (config->min_widths != NULL) {
-        /* Deep-copy so the caller's array can be transient. */
-        owned_min_widths = ucs_malloc(config->n_cols *
-                                              sizeof(*owned_min_widths),
-                                      "ucs_table_min_widths");
-        if (owned_min_widths == NULL) {
+        min_widths = ucs_malloc(config->n_cols * sizeof(*min_widths),
+                                "ucs_table_min_widths");
+        if (min_widths == NULL) {
             ucs_fatal("failed to allocate table min widths");
         }
 
-        memcpy(owned_min_widths, config->min_widths,
-               config->n_cols * sizeof(*owned_min_widths));
-        table->config.min_widths = owned_min_widths;
+        memcpy(min_widths, config->min_widths,
+               config->n_cols * sizeof(*min_widths));
+        table->config.min_widths = min_widths;
     }
 }
 
@@ -141,7 +139,6 @@ ucs_table_row_cells(ucs_table_t *table, ucs_table_row_h row)
 }
 
 
-/* Append a fresh, empty cell to a cells vector. */
 static ucs_table_cell_t *ucs_table_cells_add(ucs_table_cells_t *cells,
                                              unsigned col_span,
                                              ucs_table_align_t align)
@@ -159,7 +156,6 @@ static ucs_table_cell_t *ucs_table_cells_add(ucs_table_cells_t *cells,
 }
 
 
-/* Append a printf-formatted cell to a cells vector. Asserts no '\n'. */
 static void ucs_table_cells_add_fmt(ucs_table_cells_t *cells, unsigned col_span,
                                     ucs_table_align_t align, const char *fmt,
                                     va_list ap)
@@ -197,7 +193,6 @@ void ucs_table_row_add_cell_fmt(ucs_table_t *table, ucs_table_row_h row,
 }
 
 
-/* Calculate the total visible width of a cell spanning `col_span` columns. */
 static unsigned
 ucs_table_cell_character_width(const ucs_table_t *table, const unsigned *widths,
                                unsigned start, unsigned col_span)
@@ -294,7 +289,6 @@ static void ucs_table_compute_widths(ucs_table_t *table)
 }
 
 
-/* Format a single cell at the given pixel width, branching on alignment. */
 static void ucs_table_render_cell(ucs_string_buffer_t *strb,
                                   const ucs_table_cell_t *cell,
                                   unsigned pixel_width)
@@ -335,8 +329,6 @@ ucs_table_append_row_prefix(const ucs_table_t *table, ucs_string_buffer_t *strb)
 }
 
 
-/* Render one row. The closing "|" has no trailing newline so callers can
- * splice extra content before the line break. */
 static void ucs_table_render_cells(const ucs_table_t *table,
                                    const unsigned *widths,
                                    const ucs_table_cells_t *cells,
@@ -357,26 +349,29 @@ static void ucs_table_render_cells(const ucs_table_t *table,
 }
 
 
-/* Render a horizontal separator; carry-over for the leading `merged_cols`
- * columns is handled inline. */
 static void
 ucs_table_render_separator(const ucs_table_t *table, const unsigned *widths,
                            unsigned merged_cols, ucs_string_buffer_t *strb)
 {
     unsigned i;
 
+    ucs_assertv(merged_cols <= table->config.n_cols,
+                "merged_cols=%u exceeds n_cols=%u", merged_cols,
+                table->config.n_cols);
+
     ucs_table_append_row_prefix(table, strb);
 
-    for (i = 0; i < table->config.n_cols; ++i) {
-        if (i < merged_cols) {
-            /* Blank carry-over: continue the cell above into the cell below. */
-            ucs_string_buffer_appendc(strb, '|', 1);
-            ucs_string_buffer_appendc(strb, ' ', widths[i] + 2);
-        } else {
-            ucs_string_buffer_appendc(strb, '+', 1);
-            ucs_string_buffer_appendc(strb, '-', widths[i] + 2);
-        }
+    /* Blank carry-over: continue the cells above into the cells below. */
+    for (i = 0; i < merged_cols; ++i) {
+        ucs_string_buffer_appendc(strb, '|', 1);
+        ucs_string_buffer_appendc(strb, ' ', widths[i] + 2);
     }
+
+    for (i = merged_cols; i < table->config.n_cols; ++i) {
+        ucs_string_buffer_appendc(strb, '+', 1);
+        ucs_string_buffer_appendc(strb, '-', widths[i] + 2);
+    }
+
     ucs_string_buffer_appendc(strb, '+', 1);
     ucs_string_buffer_appendc(strb, '\n', 1);
 }
