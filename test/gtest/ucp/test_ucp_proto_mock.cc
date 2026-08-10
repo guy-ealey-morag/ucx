@@ -1884,24 +1884,35 @@ UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_proto_mock_rcx_trio_local_distance_get,
 
 class test_ucp_proto_mock_scoped_acc_devices {
 protected:
+    struct mock_gpu {
+        ucs_sys_device_t primary;
+        ucs_sys_device_t alias;
+    };
+
     ~test_ucp_proto_mock_scoped_acc_devices()
     {
-        for (auto sys_dev : m_gpus) {
-            if (sys_dev != UCS_SYS_DEVICE_ID_UNKNOWN) {
-                ucs_assert_always(
-                        ucs_topo_sys_device_set_class(
-                                sys_dev, UCS_TOPO_DEVICE_CLASS_UNKNOWN) ==
-                        UCS_OK);
-            }
+        for (const auto &gpu : m_gpus) {
+            reset_device_class(gpu.primary);
+            reset_device_class(gpu.alias);
         }
     }
 
 protected:
-    ucs_sys_device_t m_gpus[3] = {
-        UCS_SYS_DEVICE_ID_UNKNOWN,
-        UCS_SYS_DEVICE_ID_UNKNOWN,
-        UCS_SYS_DEVICE_ID_UNKNOWN,
+    mock_gpu m_gpus[3] = {
+        {UCS_SYS_DEVICE_ID_UNKNOWN, UCS_SYS_DEVICE_ID_UNKNOWN},
+        {UCS_SYS_DEVICE_ID_UNKNOWN, UCS_SYS_DEVICE_ID_UNKNOWN},
+        {UCS_SYS_DEVICE_ID_UNKNOWN, UCS_SYS_DEVICE_ID_UNKNOWN},
     };
+
+private:
+    static void reset_device_class(ucs_sys_device_t sys_dev)
+    {
+        if (sys_dev != UCS_SYS_DEVICE_ID_UNKNOWN) {
+            ucs_assert_always(ucs_topo_sys_device_set_class(
+                                      sys_dev, UCS_TOPO_DEVICE_CLASS_UNKNOWN) ==
+                              UCS_OK);
+        }
+    }
 };
 
 class test_ucp_proto_mock_rcx_single_net_dev :
@@ -2027,18 +2038,18 @@ protected:
 
     ucs_sys_device_t gpu_with_auto_selection_not(unsigned selection_id)
     {
-        for (auto sys_dev : m_gpus) {
-            if ((gpu_ordinal(sys_dev) % 3) != selection_id) {
-                return sys_dev;
+        for (const auto &gpu : m_gpus) {
+            if ((gpu_ordinal(gpu.primary) % 3) != selection_id) {
+                return gpu.primary;
             }
         }
 
         ADD_FAILURE() << "all automatic selections matched " << selection_id;
-        return m_gpus[0];
+        return m_gpus[0].primary;
     }
 
 private:
-    static ucs_sys_device_t register_mock_gpu(uint8_t slot)
+    static mock_gpu register_mock_gpu(uint8_t slot)
     {
         const ucs_sys_bus_id_t bus_id = {
             .domain   = 0xfffc,
@@ -2046,12 +2057,19 @@ private:
             .slot     = slot,
             .function = 0,
         };
-        ucs_sys_device_t sys_dev      = UCS_SYS_DEVICE_ID_UNKNOWN;
+        mock_gpu gpu = {UCS_SYS_DEVICE_ID_UNKNOWN, UCS_SYS_DEVICE_ID_UNKNOWN};
 
-        EXPECT_UCS_OK(ucs_topo_find_device_by_bus_id(&bus_id, &sys_dev));
-        EXPECT_UCS_OK(ucs_topo_sys_device_set_class(sys_dev,
+        EXPECT_UCS_OK(
+                ucs_topo_find_device_by_bus_id_and_user_value(&bus_id, 0,
+                                                              &gpu.primary));
+        EXPECT_UCS_OK(
+                ucs_topo_find_device_by_bus_id_and_user_value(&bus_id, 1,
+                                                              &gpu.alias));
+        EXPECT_UCS_OK(ucs_topo_sys_device_set_class(gpu.primary,
                                                     UCS_TOPO_DEVICE_CLASS_ACC));
-        return sys_dev;
+        EXPECT_UCS_OK(ucs_topo_sys_device_set_class(gpu.alias,
+                                                    UCS_TOPO_DEVICE_CLASS_ACC));
+        return gpu;
     }
 };
 
@@ -2059,13 +2077,16 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_single_net_dev,
            auto_selects_and_caches_each_device, "SINGLE_NET_DEVICE=y",
            "NODE_LOCAL_ID=auto", "IB_NUM_PATHS?=2", "MAX_RNDV_LANES=3")
 {
-    const unsigned first_ordinal = gpu_ordinal(m_gpus[0]);
+    const unsigned first_ordinal = gpu_ordinal(m_gpus[0].primary);
 
     EXPECT_EQ(UCS_ULUNITS_AUTO,
               sender().worker()->context->config.node_local_id);
     for (unsigned i = 0; i < 3; ++i) {
-        EXPECT_EQ(first_ordinal + i, gpu_ordinal(m_gpus[i]));
-        expect_selected_device(m_gpus[i], gpu_ordinal(m_gpus[i]));
+        EXPECT_EQ(first_ordinal + i, gpu_ordinal(m_gpus[i].primary));
+        EXPECT_EQ(first_ordinal + i, gpu_ordinal(m_gpus[i].alias));
+        expect_selected_device(m_gpus[i].primary,
+                               gpu_ordinal(m_gpus[i].primary));
+        expect_selected_device(m_gpus[i].alias, gpu_ordinal(m_gpus[i].alias));
     }
 }
 
