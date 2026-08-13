@@ -51,9 +51,9 @@ ucp_proto_multi_get_avail_bw(const ucp_proto_init_params_t *params,
         ratio = MIN_RATIO / path_index;
     }
 
-    ucs_trace("ratio=%0.3f path_index=%u" UCP_PROTO_BW_FMT(avail_bw)
-              " " UCP_PROTO_LANE_FMT, ratio, path_index,
-              UCP_PROTO_BW_ARG(lane_perf->bandwidth * ratio),
+    ucs_debug("ratio=%0.3f path_index=%u" UCP_PROTO_BW_FMT(
+                      avail_bw) " " UCP_PROTO_LANE_FMT,
+              ratio, path_index, UCP_PROTO_BW_ARG(lane_perf->bandwidth * ratio),
               UCP_PROTO_LANE_ARG(params, lane, lane_perf));
     return lane_perf->bandwidth * ratio;
 }
@@ -137,12 +137,12 @@ static ucp_lane_index_t ucp_proto_multi_find_max_avail_bw_lane(
     first_max_bw_lane = ucs_ffs64(lane_map);
 
     if (ucs_popcount(lane_map) == 1) {
-        ucs_trace("only one max bw lane %d", first_max_bw_lane);
+        ucs_debug("only one max bw lane %d", first_max_bw_lane);
         return first_max_bw_lane;
     }
 
     if (req_sys_dev_ord == UCS_SYS_DEVICE_ORDINAL_INVALID) {
-        ucs_trace("could not determine req_sys_dev %d ordinal; "
+        ucs_debug("could not determine req_sys_dev %d ordinal; "
                   "falling back to first max bw lane %d",
                   params->select_param->sys_dev, first_max_bw_lane);
         return first_max_bw_lane;
@@ -189,7 +189,7 @@ static ucp_lane_index_t ucp_proto_multi_find_max_avail_bw_lane(
                 "selected_sys_dev=%d num_max_bw_devs=%u seed=%u",
                 selected_sys_dev, num_max_bw_devs, seed);
 
-    ucs_trace("max bw lane: proto %s bdf_ord %u num_max_bw_devs %u seed %u "
+    ucs_debug("max bw lane: proto %s bdf_ord %u num_max_bw_devs %u seed %u "
               "-> sys_dev %d index %u " UCP_PROTO_LANE_FMT,
               ucp_proto_id_field(params->proto_id, name), req_sys_dev_ord,
               num_max_bw_devs, seed, selected_sys_dev, selected_index,
@@ -323,7 +323,7 @@ static ucp_lane_index_t ucp_proto_multi_filter_single_net_device(
                                    &context->config.node_local_id, NULL);
     }
 
-    ucs_trace("single net dev: proto=%s node_local_id=%s req_sys_dev_ord=%u "
+    ucs_debug("single net dev: proto=%s node_local_id=%s req_sys_dev_ord=%u "
               "num_lanes=%u fixed_first_lane=%d",
               ucp_proto_id_field(params->proto_id, name), node_local_id_str,
               req_sys_dev_ord, num_lanes, fixed_first_lane);
@@ -377,7 +377,7 @@ static ucp_lane_index_t ucp_proto_multi_filter_single_net_device(
     seed         = selection_id % num_min_dist_devs;
     selected_sys_dev = sys_devs[seed];
 
-    ucs_trace("single net dev: pick selection_id %lu %% num_min_dist_devs %u "
+    ucs_debug("single net dev: pick selection_id %lu %% num_min_dist_devs %u "
               "-> seed %u sys_dev %d",
               selection_id, num_min_dist_devs, seed, selected_sys_dev);
 
@@ -388,7 +388,7 @@ static ucp_lane_index_t ucp_proto_multi_filter_single_net_device(
         tl_rsc = ucp_proto_common_get_tl_rsc(params, lane);
         if ((tl_rsc->dev_type == UCT_DEVICE_TYPE_NET) &&
             (tl_rsc->sys_device != selected_sys_dev)) {
-            ucs_trace("single net dev: filtered out " UCP_PROTO_LANE_FMT,
+            ucs_debug("single net dev: filtered out " UCP_PROTO_LANE_FMT,
                       UCP_PROTO_LANE_ARG(params, lane, &tl_perfs[lane]));
             continue;
         }
@@ -396,7 +396,7 @@ static ucp_lane_index_t ucp_proto_multi_filter_single_net_device(
         lanes[num_filtered_lanes++] = lane;
     }
 
-    ucs_trace("single net dev: kept %u/%u lanes", num_filtered_lanes,
+    ucs_debug("single net dev: kept %u/%u lanes", num_filtered_lanes,
               num_lanes);
 
     return num_filtered_lanes;
@@ -440,7 +440,7 @@ ucp_proto_multi_find_lanes(const ucp_proto_multi_init_params_t *params,
             params->first.tl_cap_flags, params->first.tl_v2_cap_flags,
             1, 0, ucp_proto_common_filter_min_frag, lanes);
     if (num_lanes == 0) {
-        ucs_trace("no lanes for %s",
+        ucs_debug("no lanes for %s",
                   ucp_proto_id_field(params->super.super.proto_id, name));
         return UCS_ERR_NO_ELEM;
     }
@@ -510,12 +510,14 @@ ucp_proto_multi_filter_slow_lanes(const ucp_proto_multi_init_params_t *params,
         if ((lane_perf->bandwidth * max_bw_ratio) < max_bandwidth) {
             /* Bandwidth on this lane is too low compared to the fastest
                available lane, so it's not worth using it */
-            ucs_trace("drop " UCP_PROTO_LANE_FMT,
-                      UCP_PROTO_LANE_ARG(&params->super.super, lane, lane_perf));
+            ucs_debug("drop " UCP_PROTO_LANE_FMT,
+                      UCP_PROTO_LANE_ARG(&params->super.super, lane,
+                                         lane_perf));
         } else {
             lanes[num_fast_lanes++] = lane;
-            ucs_trace("avail " UCP_PROTO_LANE_FMT,
-                      UCP_PROTO_LANE_ARG(&params->super.super, lane, lane_perf));
+            ucs_debug("avail " UCP_PROTO_LANE_FMT,
+                      UCP_PROTO_LANE_ARG(&params->super.super, lane,
+                                         lane_perf));
         }
     }
 
@@ -544,7 +546,7 @@ ucp_proto_multi_select_lanes(const ucp_proto_multi_init_params_t *params,
 
     ucs_log_indent(-1);
 
-    ucs_trace("selected %u lanes for %s", selection->num_lanes,
+    ucs_debug("selected %u lanes for %s", selection->num_lanes,
               ucp_proto_id_field(params->super.super.proto_id, name));
 }
 
@@ -574,9 +576,9 @@ ucp_proto_multi_aggregate_perf(const ucp_proto_multi_init_params_t *params,
 
     ucs_for_each_bit(lane, selection->lane_map) {
         lane_perf = &lanes_perf[lane];
-        ucs_trace(UCP_PROTO_LANE_FMT UCP_PROTO_TIME_FMT(send_pre_overhead)
-                  UCP_PROTO_TIME_FMT(send_post_overhead)
-                  UCP_PROTO_TIME_FMT(recv_overhead),
+        ucs_debug(UCP_PROTO_LANE_FMT UCP_PROTO_TIME_FMT(send_pre_overhead)
+                          UCP_PROTO_TIME_FMT(send_post_overhead)
+                                  UCP_PROTO_TIME_FMT(recv_overhead),
                   UCP_PROTO_LANE_ARG(&params->super.super, lane, lane_perf),
                   UCP_PROTO_TIME_ARG(lane_perf->send_pre_overhead),
                   UCP_PROTO_TIME_ARG(lane_perf->send_post_overhead),
@@ -833,7 +835,7 @@ ucs_status_t ucp_proto_multi_init(const ucp_proto_multi_init_params_t *params,
 
     req_sys_dev_ord = ucs_topo_sys_device_get_bdf_class_ordinal(req_sys_dev);
 
-    ucs_trace(
+    ucs_debug(
             "select bw lanes: proto %s req_sys_dev=%d (%s) req_sys_dev_ord=%u",
             ucp_proto_id_field(params->super.super.proto_id, name), req_sys_dev,
             ucs_topo_sys_device_get_name(req_sys_dev), req_sys_dev_ord);
