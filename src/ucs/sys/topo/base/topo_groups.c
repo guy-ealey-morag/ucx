@@ -9,11 +9,9 @@
 #endif
 
 #include "topo_groups.h"
-#include "topo_int.h"
 
 #include <ucs/algorithm/qsort_r.h>
 #include <ucs/arch/cpu.h>
-#include <ucs/datastruct/array.h>
 #include <ucs/debug/assert.h>
 #include <ucs/debug/log.h>
 #include <ucs/debug/memtrack_int.h>
@@ -262,6 +260,7 @@ ucs_topo_groups_devices_collect(const ucs_topo_sys_device_info_t *devices,
         }
 
         *ucs_array_append(target_array,
+                          ucs_error("failed to append device to target_array");
                           return UCS_ERR_NO_MEMORY) = (ucs_sys_device_t)i;
     }
 
@@ -298,7 +297,9 @@ ucs_topo_groups_gpus_build(const ucs_topo_sys_device_info_t *devices,
         /* Start a new GPU if the bus ids differ. */
         if ((gpu_bus_id == NULL) ||
             !ucs_topo_groups_bus_id_equal(gpu_bus_id, dev_bus_id)) {
-            gpu = ucs_array_append(gpus, return UCS_ERR_NO_MEMORY);
+            gpu = ucs_array_append(gpus,
+                                   ucs_error("failed to append to gpus array");
+                                   return UCS_ERR_NO_MEMORY);
             memset(gpu, 0, sizeof(*gpu));
             gpu_bus_id = dev_bus_id;
         }
@@ -332,7 +333,9 @@ ucs_topo_groups_nics_build(const ucs_topo_sys_device_info_t *devices,
         /* Start a new NIC if the bus ids differ (excluding the function). */
         if ((nic_bus_id == NULL) ||
             !ucs_topo_groups_bus_id_same_slot(nic_bus_id, dev_bus_id)) {
-            nic = ucs_array_append(nics, return UCS_ERR_NO_MEMORY);
+            nic = ucs_array_append(nics,
+                                   ucs_error("failed to append to nics array");
+                                   return UCS_ERR_NO_MEMORY);
             memset(nic, 0, sizeof(*nic));
             nic_bus_id = dev_bus_id;
         }
@@ -357,7 +360,7 @@ void ucs_topo_init_group(ucs_topo_group_t *group)
     ucs_array_init_dynamic(&group->nics);
 }
 
-void ucs_topo_init_groups(ucs_topo_groups_t *groups)
+static void ucs_topo_init_groups(ucs_topo_groups_t *groups)
 {
     groups->type = UCS_TOPO_GROUPS_TYPE_UNKNOWN;
     ucs_array_init_dynamic(&groups->groups);
@@ -439,9 +442,13 @@ ucs_topo_groups_get_or_add_group(ucs_numa_node_t numa_node,
         }
     }
 
-    *ucs_array_append(numa_nodes, return UCS_ERR_NO_MEMORY) = numa_node;
+    *ucs_array_append(numa_nodes,
+                      ucs_error("failed to append to numa nodes array");
+                      return UCS_ERR_NO_MEMORY) = numa_node;
 
-    group = ucs_array_append(&groups->groups, return UCS_ERR_NO_MEMORY);
+    group = ucs_array_append(&groups->groups,
+                             ucs_error("failed to append to groups array");
+                             return UCS_ERR_NO_MEMORY);
     ucs_topo_init_group(group);
 
     *group_p = group;
@@ -478,6 +485,7 @@ static ucs_status_t ucs_topo_groups_build_groups_by_numa_node(
         }
 
         *ucs_array_append(&group->gpus, {
+            ucs_error("failed to append to group gpus array");
             status = UCS_ERR_NO_MEMORY;
             goto out_cleanup_numa_nodes;
         }) = *gpu;
@@ -499,6 +507,7 @@ static ucs_status_t ucs_topo_groups_build_groups_by_numa_node(
         }
 
         *ucs_array_append(&group->nics, {
+            ucs_error("failed to append to group nics array");
             status = UCS_ERR_NO_MEMORY;
             goto out_cleanup_numa_nodes;
         }) = *nic;
@@ -663,7 +672,7 @@ ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
     status = ucs_topo_groups_build_groups_by_numa_node(devices, &inventory,
                                                        groups_type, &groups);
     if (status != UCS_OK) {
-        goto err_cleanup_inventory;
+        goto err_cleanup_groups;
     }
 
     if (ucs_log_is_enabled(UCS_LOG_LEVEL_DEBUG)) {
@@ -682,7 +691,8 @@ out:
     *groups_p = groups;
     return UCS_OK;
 
-err_cleanup_inventory:
+err_cleanup_groups:
+    ucs_topo_release_groups(&groups);
     ucs_topo_release_group(&inventory);
     return status;
 }
