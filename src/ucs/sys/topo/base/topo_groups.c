@@ -520,12 +520,6 @@ out_cleanup_numa_nodes:
     return status;
 }
 
-void ucs_topo_init_group(ucs_topo_group_t *group)
-{
-    ucs_array_init_dynamic(&group->gpus);
-    ucs_array_init_dynamic(&group->nics);
-}
-
 static const char *ucs_topo_groups_type_str(ucs_topo_groups_type_t type)
 {
     switch (type) {

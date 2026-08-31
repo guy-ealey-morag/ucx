@@ -12,6 +12,7 @@
 
 #include "ucp_types.h"
 #include "ucp_thread.h"
+#include "ucp_gpu_nic_assignment.h"
 
 #include <ucp/api/ucp.h>
 #include <ucp/dt/dt.h>
@@ -449,6 +450,9 @@ typedef struct ucp_context {
                                                * mode is enabled. */
     ucp_rsc_index_t               num_tls;    /* Number of resources in the array */
     ucp_proto_id_mask_t           proto_bitmap;  /* Enabled protocols */
+
+    /* GPU-to-NIC assignment, set to NULL when not in use */
+    ucp_gpu_nic_assignment_t      *gpu_nic_assignment;
 
     /* Mem handle registration cache */
     ucs_rcache_t                  *rcache;
