@@ -7,7 +7,8 @@
 #ifndef UCS_TOPO_GROUPS_H
 #define UCS_TOPO_GROUPS_H
 
-#include <ucs/sys/topo/base/topo_int.h>
+#include "topo_int.h"
+
 #include <ucs/datastruct/array.h>
 
 BEGIN_C_DECLS
@@ -104,6 +105,14 @@ void ucs_topo_release_groups(ucs_topo_groups_t *groups);
  * @param [out] group  Group to initialize.
  */
 void ucs_topo_init_group(ucs_topo_group_t *group);
+
+
+/**
+ * Release resources allocated by a topology group.
+ *
+ * @param [in] group  Group to release.
+ */
+void ucs_topo_release_group(ucs_topo_group_t *group);
 
 
 /**
