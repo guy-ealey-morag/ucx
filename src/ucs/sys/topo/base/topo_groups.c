@@ -11,7 +11,7 @@
 #include "topo_groups.h"
 
 #include <ucs/algorithm/qsort_r.h>
-#include <ucs/arch/cpu.h>
+#include <ucs/datastruct/array.h>
 #include <ucs/debug/assert.h>
 #include <ucs/debug/log.h>
 #include <ucs/debug/memtrack_int.h>
@@ -23,10 +23,7 @@
 #include <string.h>
 
 
-#define UCS_TOPO_GROUPS_MELLANOX_VENDOR_ID 0x15b3
-#define UCS_TOPO_GROUPS_CX9_DEVICE_ID      0x1025
-#define UCS_TOPO_GROUPS_MLX5_VF_DEVICE_ID  0x101e
-#define UCS_TOPO_GROUPS_FW_VER_MAX         64
+#define UCS_TOPO_GROUPS_FW_VER_MAX 64
 
 
 UCS_ARRAY_DECLARE_TYPE(ucs_topo_groups_sys_dev_array_t, size_t,
@@ -189,9 +186,9 @@ ucs_topo_groups_cx9_filter(const ucs_topo_sys_device_info_t *devices,
                            ucs_topo_groups_sys_dev_array_t *nics)
 {
     char fw_ver[UCS_TOPO_GROUPS_FW_VER_MAX];
-    const ucs_topo_sys_device_info_t *device;
+    ucs_topo_sys_device_info_t const *device;
+    ucs_sys_pci_id_t const *pci_id;
     ucs_sys_device_t *sys_dev;
-    const ucs_sys_pci_id_t *pci_id;
     ucs_status_t status;
 
     ucs_log_indent(1);
@@ -646,22 +643,22 @@ static void ucs_topo_groups_log(const ucs_topo_sys_device_info_t *devices,
 
 ucs_status_t
 ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
-                            unsigned num_devices, ucs_topo_groups_t *groups_p)
+                            unsigned num_devices,
+                            ucs_topo_groups_type_t groups_type,
+                            ucs_topo_groups_t *groups_p)
 {
-    ucs_cpu_model_t cpu_model = ucs_arch_get_cpu_model();
-    ucs_topo_groups_type_t groups_type;
     ucs_topo_group_t inventory;
     ucs_topo_groups_t groups;
     ucs_status_t status;
 
     ucs_topo_init_groups(&groups);
 
-    if (cpu_model != UCS_CPU_MODEL_NVIDIA_VERA) {
-        /* Currently only Vera Rubin is supported. */
+    if (groups_type == UCS_TOPO_GROUPS_TYPE_UNKNOWN) {
         goto out;
     }
-
-    groups_type = UCS_TOPO_GROUPS_TYPE_VERA_RUBIN;
+    
+    /* Currently only Vera Rubin is supported. */
+    ucs_assert(groups_type == UCS_TOPO_GROUPS_TYPE_VERA_RUBIN);
 
     status = ucs_topo_groups_inventory_build(devices, num_devices, groups_type,
                                              &inventory);
