@@ -11,6 +11,7 @@
 #include "topo_groups.h"
 
 #include <ucs/algorithm/qsort_r.h>
+#include <ucs/datastruct/array.h>
 #include <ucs/debug/assert.h>
 #include <ucs/debug/log.h>
 #include <ucs/debug/memtrack_int.h>
@@ -185,9 +186,9 @@ ucs_topo_groups_cx9_filter(const ucs_topo_sys_device_info_t *devices,
                            ucs_topo_groups_sys_dev_array_t *nics)
 {
     char fw_ver[UCS_TOPO_GROUPS_FW_VER_MAX];
-    const ucs_topo_sys_device_info_t *device;
+    ucs_topo_sys_device_info_t const *device;
+    ucs_sys_pci_id_t const *pci_id;
     ucs_sys_device_t *sys_dev;
-    const ucs_sys_pci_id_t *pci_id;
     ucs_status_t status;
 
     ucs_log_indent(1);
@@ -653,10 +654,10 @@ ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
     ucs_topo_init_groups(&groups);
 
     if (groups_type == UCS_TOPO_GROUPS_TYPE_UNKNOWN) {
-        /* Currently only Vera Rubin is supported. */
         goto out;
     }
-
+    
+    /* Currently only Vera Rubin is supported. */
     ucs_assert(groups_type == UCS_TOPO_GROUPS_TYPE_VERA_RUBIN);
 
     status = ucs_topo_groups_inventory_build(devices, num_devices, groups_type,

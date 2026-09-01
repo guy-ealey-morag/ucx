@@ -7,16 +7,12 @@
 #ifndef UCS_TOPO_GROUPS_H
 #define UCS_TOPO_GROUPS_H
 
-#include "topo_int.h"
-
+#include <ucs/sys/topo/base/topo_int.h>
 #include <ucs/datastruct/array.h>
 
 BEGIN_C_DECLS
 
-/* Maximal number of ports per NIC */
-#define UCS_TOPO_MAX_PORTS_PER_NIC 2
-
-/* Maximal number of devices (uGPUs) per physical GPU */
+#define UCS_TOPO_MAX_PORTS_PER_NIC   2
 #define UCS_TOPO_MAX_DEVICES_PER_GPU 2
 
 /* CX-9 PCI identifiers */
@@ -38,8 +34,6 @@ typedef enum {
 /**
  * @ingroup UCS_RESOURCE
  * Physical GPU represented in a topology group.
- * When MPS MLOParts is enabled, the list contains the uGPUs under the same GPU.
- * When MPS MLOParts is disabled, the list contains only one device.
  */
 typedef struct {
     ucs_sys_device_t devices[UCS_TOPO_MAX_DEVICES_PER_GPU];
@@ -121,7 +115,7 @@ void ucs_topo_release_group(ucs_topo_group_t *group);
 
 
 /**
- * Initialize topology groups.
+ * Build system topology groups (internal function).
  *
  * @param [in]  devices      Array of registered system devices.
  * @param [in]  num_devices  Number of elements in @a devices.
