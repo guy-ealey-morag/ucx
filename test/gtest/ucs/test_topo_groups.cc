@@ -259,12 +259,12 @@ protected:
 };
 
 
-UCS_TEST_F(test_topo_groups, vera_groups_by_numa) {
+UCS_TEST_F(test_topo_groups, clique_groups_by_numa) {
     const std::vector<numa_devices> expected_groups = add_vera_rubin_devices();
 
-    ASSERT_UCS_OK(build(UCS_TOPO_GROUPS_TYPE_VERA_RUBIN));
+    ASSERT_UCS_OK(build(UCS_TOPO_GROUPS_TYPE_CLIQUE));
 
-    ASSERT_EQ(UCS_TOPO_GROUPS_TYPE_VERA_RUBIN, m_groups.type);
+    ASSERT_EQ(UCS_TOPO_GROUPS_TYPE_CLIQUE, m_groups.type);
     ASSERT_EQ(expected_groups.size(), ucs_array_length(&m_groups.groups));
 
     for (size_t i = 0; i < expected_groups.size(); ++i) {

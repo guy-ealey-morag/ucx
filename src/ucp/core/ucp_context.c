@@ -2771,7 +2771,7 @@ static ucs_status_t ucp_context_gpu_nic_assignment_init(ucp_context_h context)
         goto out_release_groups;
     }
 
-    if (groups.type >= UCS_TOPO_GROUPS_TYPE_LAST) {
+    if (groups.type != UCS_TOPO_GROUPS_TYPE_CLIQUE) {
         ucs_error("invalid topology groups type %d", groups.type);
         status = UCS_ERR_INVALID_PARAM;
         goto out_release_groups;
@@ -2804,7 +2804,8 @@ static ucs_status_t ucp_context_gpu_nic_assignment_init(ucp_context_h context)
         goto out_release_groups;
     }
 
-    status = ucp_gpu_nic_assignment_build(&groups, UCP_GPU_NIC_POLICY_FLIP,
+    status = ucp_gpu_nic_assignment_build(&groups,
+                                          UCP_GPU_NIC_ASSIGNMENT_POLICY_FLIP,
                                           assignment);
     if (status != UCS_OK) {
         ucs_free(assignment);

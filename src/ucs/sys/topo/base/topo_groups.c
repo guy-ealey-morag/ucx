@@ -388,7 +388,7 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
     /* TODO: Remove this filter when NVML duplicates issue is fixed. */
     ucs_topo_groups_gpu_aliases_filter(&acc_devices, devices);
 
-    if (type == UCS_TOPO_GROUPS_TYPE_VERA_RUBIN) {
+    if (type == UCS_TOPO_GROUPS_TYPE_CLIQUE) {
         ucs_topo_groups_cx9_filter(devices, &net_devices);
     }
 
@@ -656,9 +656,9 @@ ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
     if (groups_type == UCS_TOPO_GROUPS_TYPE_UNKNOWN) {
         goto out;
     }
-    
-    /* Currently only Vera Rubin is supported. */
-    ucs_assert(groups_type == UCS_TOPO_GROUPS_TYPE_VERA_RUBIN);
+
+    /* Currently only clique topology is supported. */
+    ucs_assert(groups_type == UCS_TOPO_GROUPS_TYPE_CLIQUE);
 
     status = ucs_topo_groups_inventory_build(devices, num_devices, groups_type,
                                              &inventory);
