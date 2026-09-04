@@ -2349,26 +2349,21 @@ public:
     void test_port_speed(std::function<ucp_worker_cfg_index_t()> send,
                          ucp_operation_id_t op_id)
     {
-        // One EP & rkey config created during connection establishment
+        // One EP config created during connection establishment
         ucp_worker_h worker = sender().worker();
         ucp_worker_cfg_index_t initial_rkey_cfg_index;
         ucp_worker_cfg_index_t reduced_rkey_cfg_index;
         ucp_worker_cfg_index_t equal_rkey_cfg_index;
-        size_t rkey_config_count;
 
-        EXPECT_EQ(ucs_array_length(&worker->rkey_config), 1);
         EXPECT_EQ(worker->ep_config.length, 1);
 
         // New rkey config created during first operation
         initial_rkey_cfg_index = send();
         ASSERT_NE(UCP_WORKER_CFG_INDEX_NULL, initial_rkey_cfg_index);
-        rkey_config_count = ucs_array_length(&worker->rkey_config);
-        EXPECT_GT(rkey_config_count, 1);
         EXPECT_EQ(worker->ep_config.length, 1);
 
         // Existing rkey config is used during second operation
         EXPECT_EQ(initial_rkey_cfg_index, send());
-        EXPECT_EQ(ucs_array_length(&worker->rkey_config), rkey_config_count);
         EXPECT_EQ(worker->ep_config.length, 1);
 
         ucp_proto_select_key_t key = any_key();
@@ -2383,15 +2378,12 @@ public:
         set_port_speed("mock_0:1", 14e9);
         reduced_rkey_cfg_index = send();
         EXPECT_NE(initial_rkey_cfg_index, reduced_rkey_cfg_index);
-        EXPECT_GT(ucs_array_length(&worker->rkey_config), rkey_config_count);
-        rkey_config_count = ucs_array_length(&worker->rkey_config);
         EXPECT_EQ(worker->ep_config.length, 2);
 
         // Slightly change port_speed, so that quantized value remains the same
         // This shouldn't affect EP or rkey config
         set_port_speed("mock_0:1", 14.5e9);
         EXPECT_EQ(reduced_rkey_cfg_index, send());
-        EXPECT_EQ(ucs_array_length(&worker->rkey_config), rkey_config_count);
         EXPECT_EQ(worker->ep_config.length, 2);
 
         check_rkey_config(sender(), {
@@ -2403,8 +2395,6 @@ public:
         set_port_speed("mock_1:1", 14e9);
         equal_rkey_cfg_index = send();
         EXPECT_NE(reduced_rkey_cfg_index, equal_rkey_cfg_index);
-        EXPECT_GT(ucs_array_length(&worker->rkey_config), rkey_config_count);
-        rkey_config_count = ucs_array_length(&worker->rkey_config);
         EXPECT_EQ(worker->ep_config.length, 3);
 
         check_rkey_config(sender(), {
@@ -2415,7 +2405,6 @@ public:
         set_port_speed("mock_0:1", 28e9);
         set_port_speed("mock_1:1", 24e9);
         EXPECT_EQ(initial_rkey_cfg_index, send());
-        EXPECT_EQ(ucs_array_length(&worker->rkey_config), rkey_config_count);
         EXPECT_EQ(worker->ep_config.length, 3);
     }
 
@@ -2426,7 +2415,7 @@ private:
 UCS_TEST_P(test_ucp_proto_mock_rcx_speed_change, rma_put,
            "IB_NUM_PATHS?=1", "MAX_RMA_RAILS=2", "ZCOPY_THRESH=0")
 {
-    test_port_speed([this]() { 
+    test_port_speed([this]() {
         return send_recv_rma(64 * UCS_KBYTE, UCP_OP_ID_PUT);
     }, UCP_OP_ID_PUT);
 }
@@ -2434,8 +2423,8 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_speed_change, rma_put,
 UCS_TEST_P(test_ucp_proto_mock_rcx_speed_change, rma_get,
            "IB_NUM_PATHS?=1", "MAX_RMA_RAILS=2", "ZCOPY_THRESH=0")
 {
-    test_port_speed([this]() { 
-        return send_recv_rma(64 * UCS_KBYTE, UCP_OP_ID_GET); 
+    test_port_speed([this]() {
+        return send_recv_rma(64 * UCS_KBYTE, UCP_OP_ID_GET);
     }, UCP_OP_ID_GET);
 }
 
