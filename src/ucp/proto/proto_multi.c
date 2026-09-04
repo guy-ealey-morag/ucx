@@ -22,6 +22,30 @@
 #include <ucs/sys/topo/base/topo.h>
 
 
+/*
+ * Resolve the NIC assignment for a direct contiguous CUDA protocol.
+ * Return NULL when assignment is disabled or the selection is not eligible.
+ */
+const ucp_gpu_nic_sys_dev_bitmap_t *ucp_proto_multi_get_assigned_nic_bitmap(
+        const ucp_proto_init_params_t *init_params)
+{
+    const ucp_proto_select_param_t *select_param = init_params->select_param;
+    ucp_context_h context = init_params->worker->context;
+
+    /* Only an application CUDA buffer with a stable device identity can use
+     * the context assignment. */
+    if ((select_param->mem_type != UCS_MEMORY_TYPE_CUDA) ||
+        (select_param->dt_class != UCP_DATATYPE_CONTIG) ||
+        (select_param->sys_dev == UCS_SYS_DEVICE_ID_UNKNOWN) ||
+        (context->gpu_nic_assignment == NULL)) {
+        return NULL;
+    }
+
+    /* The selection sys_dev identifies the application GPU. */
+    return ucp_gpu_nic_assignment_lookup(context->gpu_nic_assignment,
+                                         select_param->sys_dev);
+}
+
 static UCS_F_ALWAYS_INLINE double
 ucp_proto_multi_get_avail_bw(const ucp_proto_init_params_t *params,
                              ucp_lane_index_t lane,
@@ -106,6 +130,7 @@ static ucp_lane_index_t ucp_proto_multi_find_max_avail_bw_lane(
     ucp_lane_index_t i, index, selected_index, first_max_bw_lane;
     const ucp_proto_common_tl_perf_t *lane_perf;
     ucs_sys_device_t sys_dev, selected_sys_dev;
+    char *UCS_V_UNUSED tie_break;
     unsigned seed;
     double avail_bw;
     int cmp;
@@ -137,15 +162,15 @@ static ucp_lane_index_t ucp_proto_multi_find_max_avail_bw_lane(
     first_max_bw_lane = ucs_ffs64(lane_map);
 
     if (ucs_popcount(lane_map) == 1) {
-        ucs_trace("only one max bw lane %d", first_max_bw_lane);
-        return first_max_bw_lane;
+        selected_index = first_max_bw_lane;
+        tie_break      = "unique";
+        goto out;
     }
 
     if (req_sys_dev_ord == UCS_SYS_DEVICE_ORDINAL_INVALID) {
-        ucs_trace("could not determine req_sys_dev %d ordinal; "
-                  "falling back to first max bw lane %d",
-                  params->select_param->sys_dev, first_max_bw_lane);
-        return first_max_bw_lane;
+        selected_index = first_max_bw_lane;
+        tie_break      = "first-max";
+        goto out;
     }
 
     /* Pass 2: collect unique sys_devs among the tied lanes. */
@@ -189,13 +214,18 @@ static ucp_lane_index_t ucp_proto_multi_find_max_avail_bw_lane(
                 "selected_sys_dev=%d num_max_bw_devs=%u seed=%u",
                 selected_sys_dev, num_max_bw_devs, seed);
 
-    ucs_trace("max bw lane: proto %s bdf_ord %u num_max_bw_devs %u seed %u "
-              "-> sys_dev %d index %u " UCP_PROTO_LANE_FMT,
-              ucp_proto_id_field(params->proto_id, name), req_sys_dev_ord,
-              num_max_bw_devs, seed, selected_sys_dev, selected_index,
+    ucs_trace("req_sys_dev_ord=%u num_max_bw_devs=%u -> seed=%u "
+              "selected_sys_dev=%d",
+              req_sys_dev_ord, num_max_bw_devs, seed, selected_sys_dev);
+
+    tie_break = "device-ordinal";
+out:
+    ucs_trace("max avail bw lane: proto=%s total_selected=%u tie_break=%s "
+              "selected_index=%u " UCP_PROTO_LANE_FMT,
+              ucp_proto_id_field(params->proto_id, name), selection->num_lanes,
+              tie_break, selected_index,
               UCP_PROTO_LANE_ARG(params, lanes[selected_index],
                                  &lanes_perf[lanes[selected_index]]));
-
     return selected_index;
 }
 
@@ -454,6 +484,65 @@ ucp_proto_multi_find_lanes(const ucp_proto_multi_init_params_t *params,
 
     *num_lanes_p = num_lanes;
     return UCS_OK;
+}
+
+/*
+ * Apply the GPU's assigned-NIC allow-list to discovered RMA_BW candidates.
+ */
+static ucs_status_t ucp_proto_multi_filter_gpu_nic_lanes(
+        const ucp_proto_multi_init_params_t *params, ucp_lane_index_t *lanes,
+        ucp_lane_index_t *num_lanes_p)
+{
+    const ucp_proto_select_param_t *select_param =
+            params->super.super.select_param;
+    ucp_lane_index_t num_filtered_lanes       = 0;
+    ucp_lane_index_t num_rma_bw_lanes         = 0;
+    ucp_lane_index_t num_allowed_rma_bw_lanes = 0;
+    ucp_lane_index_t i, lane;
+    ucp_lane_type_t lane_type;
+    ucs_sys_device_t lane_sys_dev;
+
+    if (params->assigned_nic_bitmap == NULL) {
+        return UCS_OK;
+    }
+
+    /* Classify before compaction because index zero has the first-lane role. */
+    for (i = 0; i < *num_lanes_p; ++i) {
+        lane      = lanes[i];
+        lane_type = (i == 0) ? params->first.lane_type :
+                               params->middle.lane_type;
+        if (lane_type != UCP_LANE_TYPE_RMA_BW) {
+            lanes[num_filtered_lanes++] = lane;
+            continue;
+        }
+
+        ++num_rma_bw_lanes;
+        lane_sys_dev = ucp_proto_common_get_sys_dev(&params->super.super, lane);
+
+        /* Keep only lanes whose local transport function is assigned. */
+        if (!ucp_gpu_nic_bitmap_test(params->assigned_nic_bitmap,
+                                     lane_sys_dev)) {
+            ucs_trace("gpu sys_dev %d removes lane %d on network sys_dev %d",
+                      select_param->sys_dev, lane, lane_sys_dev);
+            continue;
+        }
+
+        ucs_trace("gpu sys_dev %d keeps lane %d on network sys_dev %d",
+                  select_param->sys_dev, lane, lane_sys_dev);
+        lanes[num_filtered_lanes++] = lane;
+        ++num_allowed_rma_bw_lanes;
+    }
+
+    /* A non-RMA_BW invocation remains unchanged. */
+    *num_lanes_p = num_filtered_lanes;
+    if (num_rma_bw_lanes == 0) {
+        return UCS_OK;
+    }
+
+    ucs_trace("gpu sys_dev %d retained %u/%u allowed RMA_BW lanes",
+              select_param->sys_dev, num_allowed_rma_bw_lanes,
+              num_rma_bw_lanes);
+    return (num_allowed_rma_bw_lanes == 0) ? UCS_ERR_NO_ELEM : UCS_OK;
 }
 
 /* Get the performance and maximal bandwidth of all candidate lanes. */
@@ -804,7 +893,8 @@ ucs_status_t ucp_proto_multi_init(const ucp_proto_multi_init_params_t *params,
                                   ucp_proto_perf_t **perf_p,
                                   ucp_proto_multi_priv_t *mpriv)
 {
-    ucs_sys_device_t req_sys_dev = params->super.super.select_param->sys_dev;
+    const ucp_proto_init_params_t *init_params = &params->super.super;
+    ucs_sys_device_t req_sys_dev    = init_params->select_param->sys_dev;
     ucp_lane_map_t queried_lane_map = 0;
     ucp_proto_common_tl_perf_t lanes_perf[UCP_PROTO_MAX_LANES];
     ucp_proto_common_tl_perf_t perf;
@@ -827,6 +917,12 @@ ucs_status_t ucp_proto_multi_init(const ucp_proto_multi_init_params_t *params,
         return status;
     }
 
+    /* Remove unassigned RMA_BW lanes before acquiring performance nodes. */
+    status = ucp_proto_multi_filter_gpu_nic_lanes(params, lanes, &num_lanes);
+    if (status != UCS_OK) {
+        return status;
+    }
+
     status = ucp_proto_multi_query_lanes(params, lanes, num_lanes, lanes_perf,
                                          &queried_lane_map, &max_bandwidth);
     if (status != UCS_OK) {
@@ -839,18 +935,23 @@ ucs_status_t ucp_proto_multi_init(const ucp_proto_multi_init_params_t *params,
                                                          fixed_first_lane, num_lanes,
                                                          lanes);
 
-    req_sys_dev_ord = ucs_topo_sys_device_get_bdf_class_ordinal(req_sys_dev);
+    /* Assignment already determines the eligible devices. Use the stable
+     * first-max-bandwidth tie break on every greedy selection round. */
+    req_sys_dev_ord = (params->assigned_nic_bitmap == NULL) ?
+                              ucs_topo_sys_device_get_bdf_class_ordinal(
+                                      req_sys_dev) :
+                              UCS_SYS_DEVICE_ORDINAL_INVALID;
 
-    ucs_trace(
-            "select bw lanes: proto %s req_sys_dev=%d (%s) req_sys_dev_ord=%u",
-            ucp_proto_id_field(params->super.super.proto_id, name), req_sys_dev,
-            ucs_topo_sys_device_get_name(req_sys_dev), req_sys_dev_ord);
-
-    if (params->super.super.worker->context->config.ext
-                .proto_use_single_net_device) {
-        num_lanes = ucp_proto_multi_filter_single_net_device(
-                num_lanes, &params->super.super, lanes_perf, fixed_first_lane,
-                req_sys_dev_ord, lanes);
+    if (init_params->worker->context->config.ext.proto_use_single_net_device) {
+        if (params->assigned_nic_bitmap == NULL) {
+            num_lanes = ucp_proto_multi_filter_single_net_device(
+                    num_lanes, init_params, lanes_perf, fixed_first_lane,
+                    req_sys_dev_ord, lanes);
+        } else {
+            ucs_trace("proto %s skips single net device filtering with gpu-nic "
+                      "assignment",
+                      ucp_proto_id_field(init_params->proto_id, name));
+        }
     }
 
     /* Select the lanes to use, and calculate their aggregate performance */
