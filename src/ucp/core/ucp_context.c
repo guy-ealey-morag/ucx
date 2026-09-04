@@ -2784,14 +2784,14 @@ static ucs_status_t ucp_context_gpu_nic_assignment_init(ucp_context_h context)
     }
 
     if (context->config.ext.proto_use_single_net_device != 0) {
-        ucs_error("UCX_SINGLE_NET_DEVICE=y is not supported with vera-rubin "
+        ucs_error("UCX_SINGLE_NET_DEVICE=y is not supported with clique "
                   "topology");
         status = UCS_ERR_INVALID_PARAM;
         goto out_release_groups;
     }
 
     if (context->config.ext.proto_enable == 0) {
-        ucs_error("UCX_PROTO_ENABLE=n is not supported with vera-rubin "
+        ucs_error("UCX_PROTO_ENABLE=n is not supported with clique "
                   "topology");
         status = UCS_ERR_INVALID_PARAM;
         goto out_release_groups;
