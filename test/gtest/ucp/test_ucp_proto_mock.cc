@@ -2349,22 +2349,20 @@ public:
     void test_port_speed(std::function<ucp_worker_cfg_index_t()> send,
                          ucp_operation_id_t op_id)
     {
-        // One EP config created during connection establishment
         ucp_worker_h worker = sender().worker();
-        ucp_worker_cfg_index_t initial_rkey_cfg_index;
-        ucp_worker_cfg_index_t reduced_rkey_cfg_index;
-        ucp_worker_cfg_index_t equal_rkey_cfg_index;
 
-        EXPECT_EQ(worker->ep_config.length, 1);
-
-        // New rkey config created during first operation
-        initial_rkey_cfg_index = send();
+        // Capture the initial configurations
+        const auto initial_rkey_cfg_index = send();
         ASSERT_NE(UCP_WORKER_CFG_INDEX_NULL, initial_rkey_cfg_index);
-        EXPECT_EQ(worker->ep_config.length, 1);
+        size_t rkey_config_count = ucs_array_length(&worker->rkey_config);
+        unsigned ep_config_count = worker->ep_config.length;
+        EXPECT_GT(rkey_config_count, 0);
+        EXPECT_GT(ep_config_count, 0);
 
-        // Existing rkey config is used during second operation
+        // Existing configurations are used during second operation
         EXPECT_EQ(initial_rkey_cfg_index, send());
-        EXPECT_EQ(worker->ep_config.length, 1);
+        EXPECT_EQ(ucs_array_length(&worker->rkey_config), rkey_config_count);
+        EXPECT_EQ(worker->ep_config.length, ep_config_count);
 
         ucp_proto_select_key_t key = any_key();
         key.param.op_id_flags      = op_id;
@@ -2376,15 +2374,17 @@ public:
 
         // Reduce port_speed of mock_0:1 by 50%, new EP & rkey configs are created
         set_port_speed("mock_0:1", 14e9);
-        reduced_rkey_cfg_index = send();
+        const auto reduced_rkey_cfg_index = send();
         EXPECT_NE(initial_rkey_cfg_index, reduced_rkey_cfg_index);
-        EXPECT_EQ(worker->ep_config.length, 2);
+        EXPECT_EQ(ucs_array_length(&worker->rkey_config), ++rkey_config_count);
+        EXPECT_EQ(worker->ep_config.length, ++ep_config_count);
 
         // Slightly change port_speed, so that quantized value remains the same
         // This shouldn't affect EP or rkey config
         set_port_speed("mock_0:1", 14.5e9);
         EXPECT_EQ(reduced_rkey_cfg_index, send());
-        EXPECT_EQ(worker->ep_config.length, 2);
+        EXPECT_EQ(ucs_array_length(&worker->rkey_config), rkey_config_count);
+        EXPECT_EQ(worker->ep_config.length, ep_config_count);
 
         check_rkey_config(sender(), {
             {0, INF, "zero-copy", "64% on rc_mlx5/mock_1:1 and 36% on rc_mlx5/mock_0:1"},
@@ -2393,9 +2393,10 @@ public:
         // Reduce port_speed of mock_1:1 to be equal with mock_0:1,
         // new EP & rkey configs are created
         set_port_speed("mock_1:1", 14e9);
-        equal_rkey_cfg_index = send();
+        const auto equal_rkey_cfg_index = send();
         EXPECT_NE(reduced_rkey_cfg_index, equal_rkey_cfg_index);
-        EXPECT_EQ(worker->ep_config.length, 3);
+        EXPECT_EQ(ucs_array_length(&worker->rkey_config), ++rkey_config_count);
+        EXPECT_EQ(worker->ep_config.length, ++ep_config_count);
 
         check_rkey_config(sender(), {
             {0, INF, "zero-copy", "50% on rc_mlx5/mock_1:1 and 50% on rc_mlx5/mock_0:1"},
@@ -2405,7 +2406,8 @@ public:
         set_port_speed("mock_0:1", 28e9);
         set_port_speed("mock_1:1", 24e9);
         EXPECT_EQ(initial_rkey_cfg_index, send());
-        EXPECT_EQ(worker->ep_config.length, 3);
+        EXPECT_EQ(ucs_array_length(&worker->rkey_config), rkey_config_count);
+        EXPECT_EQ(worker->ep_config.length, ep_config_count);
     }
 
 private:
@@ -2428,6 +2430,7 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_speed_change, rma_get,
     }, UCP_OP_ID_GET);
 }
 
-UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_proto_mock_rcx_speed_change, rcx, "rc_x")
+UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_proto_mock_rcx_speed_change, rc_mlx5,
+                              "rc_mlx5")
 
 #endif // HAVE_DECL_IBV_EVENT_DEVICE_SPEED_CHANGE
