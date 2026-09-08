@@ -87,8 +87,8 @@ ucp_gpu_nic_assignment_lookup(const ucp_gpu_nic_assignment_t *assignment,
  * @return Nonzero if @a net_sys_dev is present in @a bitmap, or zero if the
  *         system device is unknown or the bit is not set.
  */
-int ucp_gpu_nic_bitmap_test(const ucp_gpu_nic_sys_dev_bitmap_t *bitmap,
-                            ucs_sys_device_t net_sys_dev);
+int ucp_gpu_nic_bitmap_get(const ucp_gpu_nic_sys_dev_bitmap_t *bitmap,
+                           ucs_sys_device_t net_sys_dev);
 
 
 /**

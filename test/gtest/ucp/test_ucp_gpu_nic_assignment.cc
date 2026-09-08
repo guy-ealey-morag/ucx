@@ -196,7 +196,7 @@ protected:
                 ASSERT_NE(nullptr, nic_sys_dev_bitmap);
 
                 size_t port_idx         = 0;
-                const bool gpu_owns_nic = ucp_gpu_nic_bitmap_test(
+                const bool gpu_owns_nic = ucp_gpu_nic_bitmap_get(
                         nic_sys_dev_bitmap,
                         nic_port_sys_dev(config, nic_idx, port_idx));
 
@@ -204,7 +204,7 @@ protected:
                 for (port_idx = 1; port_idx < config.num_nic_ports;
                      ++port_idx) {
                     EXPECT_EQ(gpu_owns_nic,
-                              ucp_gpu_nic_bitmap_test(
+                              ucp_gpu_nic_bitmap_get(
                                       nic_sys_dev_bitmap,
                                       nic_port_sys_dev(config, nic_idx,
                                                        port_idx)));
@@ -216,9 +216,8 @@ protected:
                 }
 
                 EXPECT_EQ(gpu_idx == expected_owner, gpu_owns_nic);
-                EXPECT_FALSE(
-                        ucp_gpu_nic_bitmap_test(nic_sys_dev_bitmap,
-                                                UCS_SYS_DEVICE_ID_UNKNOWN));
+                EXPECT_FALSE(ucp_gpu_nic_bitmap_get(nic_sys_dev_bitmap,
+                                                    UCS_SYS_DEVICE_ID_UNKNOWN));
             }
 
             EXPECT_EQ(expected_owner, actual_owner);

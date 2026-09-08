@@ -92,7 +92,7 @@ ucp_gpu_nic_assignment_log_group(const ucp_gpu_nic_assignment_t *assignment,
         for (gpu_idx = 0; gpu_idx < num_gpus; ++gpu_idx) {
             nic_sys_dev_bitmap =
                     &assignment->nic_sys_dev_bitmaps[base_bitmap_idx + gpu_idx];
-            if (!ucp_gpu_nic_bitmap_test(nic_sys_dev_bitmap, nic->ports[0])) {
+            if (!ucp_gpu_nic_bitmap_get(nic_sys_dev_bitmap, nic->ports[0])) {
                 continue;
             }
 
@@ -291,8 +291,8 @@ ucp_gpu_nic_assignment_lookup(const ucp_gpu_nic_assignment_t *assignment,
     return &assignment->nic_sys_dev_bitmaps[nic_sys_dev_bitmap_idx];
 }
 
-int ucp_gpu_nic_bitmap_test(const ucp_gpu_nic_sys_dev_bitmap_t *bitmap,
-                            ucs_sys_device_t net_sys_dev)
+int ucp_gpu_nic_bitmap_get(const ucp_gpu_nic_sys_dev_bitmap_t *bitmap,
+                           ucs_sys_device_t net_sys_dev)
 {
     ucs_assert(bitmap != NULL);
 
