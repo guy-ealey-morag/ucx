@@ -86,10 +86,6 @@ ucs_topo_groups_sys_dev_compact(ucs_topo_groups_sys_dev_array_t *sys_devs)
         }
     }
 
-    for (src = dst; src < ucs_array_length(sys_devs); ++src) {
-        ucs_array_elem(sys_devs, src) = UCS_SYS_DEVICE_ID_UNKNOWN;
-    }
-
     ucs_array_set_length(sys_devs, dst);
 }
 
@@ -285,6 +281,7 @@ ucs_topo_groups_devices_collect(const ucs_topo_sys_device_info_t *devices,
     return UCS_OK;
 }
 
+/* Compare two bus ids up to their slot (excluding the function). */
 static int ucs_topo_groups_bus_id_same_slot(const ucs_sys_bus_id_t *bus_id1,
                                             const ucs_sys_bus_id_t *bus_id2)
 {
@@ -292,6 +289,7 @@ static int ucs_topo_groups_bus_id_same_slot(const ucs_sys_bus_id_t *bus_id1,
            (bus_id1->bus == bus_id2->bus) && (bus_id1->slot == bus_id2->slot);
 }
 
+/* Compare two bus ids. */
 static int ucs_topo_groups_bus_id_equal(const ucs_sys_bus_id_t *bus_id1,
                                         const ucs_sys_bus_id_t *bus_id2)
 {
@@ -402,8 +400,7 @@ void ucs_topo_init_groups(ucs_topo_groups_t *groups)
 
 static ucs_status_t
 ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
-                                unsigned num_devices,
-                                ucs_topo_groups_type_t type,
+                                unsigned num_devices, int is_vera_rubin,
                                 ucs_topo_group_t *inventory_p)
 {
     ucs_topo_groups_sys_dev_array_t acc_devices = UCS_ARRAY_DYNAMIC_INITIALIZER;
@@ -428,7 +425,7 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
     /* TODO: Remove this filter when NVML duplicates issue is fixed. */
     ucs_topo_groups_gpu_aliases_filter(&acc_devices, devices);
 
-    if (type == UCS_TOPO_GROUPS_TYPE_VERA_RUBIN) {
+    if (is_vera_rubin) {
         ucs_topo_groups_cx9_filter(devices, &net_devices);
     }
 
@@ -444,10 +441,9 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
 
     ucs_debug("built inventory with %zu physical gpus (%zu devices) and %zu "
               "physical nics (%zu devices)",
-              (size_t)ucs_array_length(&inventory.gpus),
-              (size_t)ucs_array_length(&acc_devices),
-              (size_t)ucs_array_length(&inventory.nics),
-              (size_t)ucs_array_length(&net_devices));
+              ucs_array_length(&inventory.gpus), ucs_array_length(&acc_devices),
+              ucs_array_length(&inventory.nics),
+              ucs_array_length(&net_devices));
 
     ucs_array_cleanup_dynamic(&net_devices);
     ucs_array_cleanup_dynamic(&acc_devices);
@@ -505,7 +501,7 @@ ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
         goto out;
     }
 
-    status = ucs_topo_groups_inventory_build(devices, num_devices, groups_type,
+    status = ucs_topo_groups_inventory_build(devices, num_devices, 1,
                                              &inventory);
     if (status != UCS_OK) {
         return status;
