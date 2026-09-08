@@ -209,6 +209,9 @@ ucs_topo_groups_cx9_filter(const ucs_topo_sys_device_info_t *devices,
                 continue;
             } else if (pci_id->device == UCS_TOPO_GROUPS_MLX5_VF_DEVICE_ID) {
                 ucs_trace("mlx5 VF device found");
+
+                /* PCI device ID is not indicative when the device is a VF,
+                 * instead use the fact that fw version is 82.XX.XXXX for CX9 */
                 status = ucs_topo_groups_read_ib_fw_ver(&device->bus_id, fw_ver,
                                                         sizeof(fw_ver));
                 if (status == UCS_OK) {
