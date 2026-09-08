@@ -32,7 +32,7 @@ typedef struct {
 
 typedef enum {
     /**
-     * Assign each NIC, with all of its ports, going forward and then backward 
+     * Assign each NIC, with all of its ports, going forward and then backward
      * across the GPUs.
      * The group's GPUs are assigned the following NIC indices in order:
      * 0, 1, ..., num_nics-1, num_nics-1, ..., 1, 0, 0, 1, ...
@@ -40,7 +40,7 @@ typedef enum {
     UCP_GPU_NIC_ASSIGNMENT_POLICY_FLIP,
 
     /**
-     * Assign each NIC, with all of its ports, to GPUs repeatedly in ascending 
+     * Assign each NIC, with all of its ports, to GPUs repeatedly in ascending
      * order.
      * The group's GPUs are assigned the following NIC indices in order:
      * 0, 1, ..., num_nics-1, 0, 1, ..., num_nics-1, 0, 1, ...
