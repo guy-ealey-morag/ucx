@@ -31,7 +31,8 @@ ucp_gpu_nic_assignment_get_gpu_idx(ucp_gpu_nic_assignment_policy_t policy,
         return gpu_idx;
     }
 
-    ucs_assert(policy == UCP_GPU_NIC_ASSIGNMENT_POLICY_FLIP);
+    ucs_assertv(policy == UCP_GPU_NIC_ASSIGNMENT_POLICY_FLIP,
+                "invalid policy: %d", (int)policy);
     leg = nic_idx / num_gpus;
     if ((leg % 2) != 0) {
         gpu_idx = num_gpus - 1 - gpu_idx;
@@ -46,8 +47,9 @@ ucp_gpu_nic_bitmap_add_nic(ucp_gpu_nic_sys_dev_bitmap_t *nic_sys_dev_bitmap,
 {
     const ucs_sys_device_t *port;
 
-    ucs_assert((nic->num_ports > 0) &&
-               (nic->num_ports <= UCS_TOPO_MAX_PORTS_PER_NIC));
+    ucs_assertv((nic->num_ports > 0) &&
+                        (nic->num_ports <= UCS_TOPO_MAX_PORTS_PER_NIC),
+                "invalid num_ports: %zu", nic->num_ports);
 
     ucs_carray_for_each(port, nic->ports, nic->num_ports) {
         ucs_assert(*port != UCS_SYS_DEVICE_ID_UNKNOWN);
@@ -158,13 +160,16 @@ static void ucp_gpu_nic_assignment_map_gpu(ucp_gpu_nic_assignment_t *assignment,
 {
     const ucs_sys_device_t *gpu_sys_dev;
 
-    ucs_assert(nic_sys_dev_bitmap_idx < UCP_GPU_NIC_BITMAP_INDEX_INVALID);
+    ucs_assertv(nic_sys_dev_bitmap_idx < UCP_GPU_NIC_BITMAP_INDEX_INVALID,
+                "invalid nic_sys_dev_bitmap_idx: %zu", nic_sys_dev_bitmap_idx);
 
     /* Assign the same bitmap to all devices under the same GPU. */
     ucs_carray_for_each(gpu_sys_dev, gpu->devices, gpu->num_devices) {
         ucs_assert(*gpu_sys_dev != UCS_SYS_DEVICE_ID_UNKNOWN);
-        ucs_assert(assignment->bitmap_idx_by_gpu_sys_dev[*gpu_sys_dev] ==
-                   UCP_GPU_NIC_BITMAP_INDEX_INVALID);
+        ucs_assertv(assignment->bitmap_idx_by_gpu_sys_dev[*gpu_sys_dev] ==
+                            UCP_GPU_NIC_BITMAP_INDEX_INVALID,
+                    "gpu_sys_dev %u is already assigned to bitmap %zu",
+                    *gpu_sys_dev, nic_sys_dev_bitmap_idx);
 
         assignment->bitmap_idx_by_gpu_sys_dev[*gpu_sys_dev] = (uint8_t)
                 nic_sys_dev_bitmap_idx;
@@ -185,7 +190,10 @@ ucp_gpu_nic_assignment_add_group(ucp_gpu_nic_assignment_t *assignment,
     size_t gpu_idx;
     size_t bitmap_idx;
 
-    ucs_assert((base_bitmap_idx + num_gpus) <= assignment->num_bitmaps);
+    ucs_assertv(
+            (base_bitmap_idx + num_gpus) <= assignment->num_bitmaps,
+            "base_bitmap_idx + num_gpus exceeds num_bitmaps: %zu + %zu > %zu",
+            base_bitmap_idx, num_gpus, assignment->num_bitmaps);
 
     ucs_array_for_each_index(nic, nic_idx, &group->nics) {
         gpu_idx = ucp_gpu_nic_assignment_get_gpu_idx(policy, num_gpus, nic_idx);
@@ -197,8 +205,9 @@ ucp_gpu_nic_assignment_add_group(ucp_gpu_nic_assignment_t *assignment,
     ucs_array_for_each_index(gpu, gpu_idx, &group->gpus) {
         bitmap_idx         = base_bitmap_idx + gpu_idx;
         nic_sys_dev_bitmap = &assignment->nic_sys_dev_bitmaps[bitmap_idx];
-        ucs_assert((gpu->num_devices > 0) &&
-                   (gpu->num_devices <= UCS_TOPO_MAX_DEVICES_PER_GPU));
+        ucs_assertv((gpu->num_devices > 0) &&
+                            (gpu->num_devices <= UCS_TOPO_MAX_DEVICES_PER_GPU),
+                    "invalid num_devices: %zu", gpu->num_devices);
 
         if (UCS_STATIC_BITMAP_IS_ZERO(*nic_sys_dev_bitmap)) {
             ucs_debug("gpu #%zu in group #%zu has no assigned nics", gpu_idx,
@@ -244,7 +253,10 @@ ucp_gpu_nic_assignment_build(const ucs_topo_groups_t *groups,
         base_bitmap_idx += ucs_array_length(&group->gpus);
     }
 
-    ucs_assert(base_bitmap_idx == assignment.num_bitmaps);
+    ucs_assertv(base_bitmap_idx == assignment.num_bitmaps,
+                "not all bitmaps are used: %zu != %zu", base_bitmap_idx,
+                assignment.num_bitmaps);
+
     ucs_assert(assignment_p != NULL);
     *assignment_p = assignment;
 
@@ -272,7 +284,10 @@ ucp_gpu_nic_assignment_lookup(const ucp_gpu_nic_assignment_t *assignment,
         return NULL;
     }
 
-    ucs_assert(nic_sys_dev_bitmap_idx < assignment->num_bitmaps);
+    ucs_assertv(nic_sys_dev_bitmap_idx < assignment->num_bitmaps,
+                "invalid nic_sys_dev_bitmap_idx %u assigned to gpu_sys_dev %u",
+                nic_sys_dev_bitmap_idx, gpu_sys_dev);
+
     return &assignment->nic_sys_dev_bitmaps[nic_sys_dev_bitmap_idx];
 }
 
