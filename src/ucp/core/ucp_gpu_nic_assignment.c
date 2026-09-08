@@ -128,7 +128,7 @@ ucp_gpu_nic_assignment_allocate_bitmaps(ucp_gpu_nic_assignment_t *assignment,
     size_t num_bitmaps = 0;
     const ucs_topo_group_t *group;
 
-    ucs_array_for_each(group, &groups->groups) {
+    ucs_array_for_each(group, groups) {
         num_bitmaps += ucs_array_length(&group->gpus);
     }
 
@@ -242,7 +242,7 @@ ucp_gpu_nic_assignment_build(const ucs_topo_groups_t *groups,
         goto err_cleanup_sys_dev_bitmaps;
     }
 
-    ucs_array_for_each_index(group, group_idx, &groups->groups) {
+    ucs_array_for_each_index(group, group_idx, groups) {
         if (ucs_array_is_empty(&group->gpus)) {
             ucs_debug("group #%zu has 0 GPUs, skipping", group_idx);
             continue;

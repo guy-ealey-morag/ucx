@@ -37,14 +37,13 @@ public:
 
 protected:
     struct topology_shape_t {
-        ucs_topo_groups_type_t type;
-        size_t                 num_groups;
-        size_t                 num_gpus_per_group;
-        size_t                 num_nics_per_group;
-        size_t                 num_gpu_devices;
-        size_t                 num_nic_ports;
+        size_t num_groups;
+        size_t num_gpus_per_group;
+        size_t num_nics_per_group;
+        size_t num_gpu_devices;
+        size_t num_nic_ports;
 
-        size_t                 num_gpus() const noexcept
+        size_t num_gpus() const noexcept
         {
             return num_groups * num_gpus_per_group;
         }
@@ -88,12 +87,11 @@ protected:
             m_groups_initialized = false;
         }
 
-        ucs_array_init_dynamic(&m_groups.groups);
-        m_groups.type        = config.type;
+        ucs_array_init_dynamic(&m_groups);
         m_groups_initialized = true;
 
         for (size_t group_idx = 0; group_idx < config.num_groups; ++group_idx) {
-            group = ucs_array_append(&m_groups.groups,
+            group = ucs_array_append(&m_groups,
                                      FAIL() << "Failed to append group");
             ucs_topo_init_group(group);
 
@@ -283,7 +281,6 @@ protected:
     {
         topology_shape_t config;
 
-        config.type               = UCS_TOPO_GROUPS_TYPE_CLIQUE;
         config.num_groups         = num_groups;
         config.num_gpus_per_group = num_gpus_per_group;
         config.num_nics_per_group = num_nics_per_group;
