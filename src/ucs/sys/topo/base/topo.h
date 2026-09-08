@@ -276,6 +276,22 @@ ucs_topo_get_bus_id_bit_repr(const ucs_sys_bus_id_t *bus_id);
 
 
 /**
+ * Compare two system devices by their topology identity.
+ *
+ * Registered devices are ordered by PCI bus id, then by user-defined value.
+ * @ref UCS_SYS_DEVICE_ID_UNKNOWN is ordered after all registered devices.
+ * Other device identifiers must be valid and registered.
+ *
+ * @param [in] sys_dev1  First system device.
+ * @param [in] sys_dev2  Second system device.
+ *
+ * @return A negative value if @a sys_dev1 precedes @a sys_dev2, a positive
+ *         value if @a sys_dev2 precedes @a sys_dev1, or zero if equal.
+ */
+int ucs_topo_sys_dev_cmp(ucs_sys_device_t sys_dev1, ucs_sys_device_t sys_dev2);
+
+
+/**
  * Find the distance between two system devices (in terms of latency,
  * bandwidth, hops, etc).
  *

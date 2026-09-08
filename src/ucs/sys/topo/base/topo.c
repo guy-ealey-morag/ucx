@@ -268,6 +268,52 @@ ucs_topo_bus_value_key_make(const ucs_sys_bus_id_t *bus_id,
     return key;
 }
 
+int ucs_topo_sys_dev_cmp_nolock(ucs_sys_device_t sys_dev1,
+                                ucs_sys_device_t sys_dev2)
+{
+    const ucs_topo_sys_device_info_t *device1, *device2;
+    ucs_bus_id_bit_rep_t bus_id1, bus_id2;
+
+    ucs_assertv((sys_dev1 == UCS_SYS_DEVICE_ID_UNKNOWN) ||
+                        (sys_dev1 < ucs_topo_global_ctx.num_devices),
+                "invalid sys_dev1: %u", sys_dev1);
+    ucs_assertv((sys_dev2 == UCS_SYS_DEVICE_ID_UNKNOWN) ||
+                        (sys_dev2 < ucs_topo_global_ctx.num_devices),
+                "invalid sys_dev2: %u", sys_dev2);
+
+    /* Unknown devices are ordered after all registered devices. */
+    if ((sys_dev1 == UCS_SYS_DEVICE_ID_UNKNOWN) ||
+        (sys_dev2 == UCS_SYS_DEVICE_ID_UNKNOWN)) {
+        return (sys_dev1 > sys_dev2) - (sys_dev1 < sys_dev2);
+    }
+
+    device1 = &ucs_topo_global_ctx.devices[sys_dev1];
+    device2 = &ucs_topo_global_ctx.devices[sys_dev2];
+
+    /* Compare by bus id.*/
+    bus_id1 = ucs_topo_get_bus_id_bit_repr(&device1->bus_id);
+    bus_id2 = ucs_topo_get_bus_id_bit_repr(&device2->bus_id);
+
+    if (bus_id1 != bus_id2) {
+        return (bus_id1 > bus_id2) - (bus_id1 < bus_id2);
+    }
+
+    /* Compare by user value. */
+    return (device1->user_value > device2->user_value) -
+           (device1->user_value < device2->user_value);
+}
+
+int ucs_topo_sys_dev_cmp(ucs_sys_device_t sys_dev1, ucs_sys_device_t sys_dev2)
+{
+    int result;
+
+    ucs_spin_lock(&ucs_topo_global_ctx.lock);
+    result = ucs_topo_sys_dev_cmp_nolock(sys_dev1, sys_dev2);
+    ucs_spin_unlock(&ucs_topo_global_ctx.lock);
+
+    return result;
+}
+
 unsigned ucs_topo_num_devices()
 {
     unsigned num_devices;

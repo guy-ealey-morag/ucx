@@ -168,6 +168,51 @@ UCS_TEST_F(test_topo, find_device_by_bus_id) {
     EXPECT_GE(ucs_topo_num_devices(), 2);
 }
 
+UCS_TEST_F(test_topo, sys_dev_cmp) {
+    static const uintptr_t user_value1 = 17;
+    static const uintptr_t user_value2 = 42;
+    const ucs_sys_bus_id_t bus_id1     = {0, 1, 2, 0};
+    const ucs_sys_bus_id_t bus_id2     = {0, 2, 2, 0};
+    ucs_sys_device_t dev1, dev1_alias1, dev1_alias2, dev2, dev2_alias1;
+
+    ASSERT_UCS_OK(ucs_topo_find_device_by_bus_id(&bus_id1, &dev1));
+    ASSERT_UCS_OK(ucs_topo_find_device_by_bus_id(&bus_id2, &dev2));
+    ASSERT_UCS_OK(ucs_topo_find_device_by_bus_id_and_user_value(&bus_id1,
+                                                                user_value1,
+                                                                &dev1_alias1));
+    ASSERT_UCS_OK(ucs_topo_find_device_by_bus_id_and_user_value(&bus_id1,
+                                                                user_value2,
+                                                                &dev1_alias2));
+    ASSERT_UCS_OK(ucs_topo_find_device_by_bus_id_and_user_value(&bus_id2,
+                                                                user_value1,
+                                                                &dev2_alias1));
+
+    /* Identical devices compare equal; BDF is the primary key. */
+    EXPECT_EQ(0, ucs_topo_sys_dev_cmp(dev1, dev1));
+    EXPECT_LT(ucs_topo_sys_dev_cmp(dev1, dev2), 0);
+    EXPECT_GT(ucs_topo_sys_dev_cmp(dev2, dev1), 0);
+    EXPECT_LT(ucs_topo_sys_dev_cmp(dev1_alias2, dev2_alias1), 0);
+    EXPECT_GT(ucs_topo_sys_dev_cmp(dev2_alias1, dev1_alias2), 0);
+
+    /* User value breaks BDF ties; the empty value sorts last. */
+    EXPECT_LT(ucs_topo_sys_dev_cmp(dev1_alias1, dev1_alias2), 0);
+    EXPECT_GT(ucs_topo_sys_dev_cmp(dev1_alias2, dev1_alias1), 0);
+    EXPECT_LT(ucs_topo_sys_dev_cmp(dev1_alias2, dev1), 0);
+    EXPECT_LT(ucs_topo_sys_dev_cmp(dev2_alias1, dev2), 0);
+
+    /* Unknown devices compare equal to each other. */
+    EXPECT_EQ(0, ucs_topo_sys_dev_cmp(UCS_SYS_DEVICE_ID_UNKNOWN,
+                                      UCS_SYS_DEVICE_ID_UNKNOWN));
+
+    /* Unknown devices sort last. */
+    for (unsigned i = 0; i < ucs_topo_num_devices(); ++i) {
+        const auto sys_dev = static_cast<ucs_sys_device_t>(i);
+
+        EXPECT_LT(ucs_topo_sys_dev_cmp(sys_dev, UCS_SYS_DEVICE_ID_UNKNOWN), 0);
+        EXPECT_GT(ucs_topo_sys_dev_cmp(UCS_SYS_DEVICE_ID_UNKNOWN, sys_dev), 0);
+    }
+}
+
 UCS_TEST_F(test_topo, pci_id_equal) {
     const ucs_sys_pci_id_t pci_id0 = {0x15b3, 0x101b};
     const ucs_sys_pci_id_t pci_id1 = {0x15b3, 0x101b};

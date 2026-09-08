@@ -33,34 +33,19 @@ UCS_ARRAY_DECLARE_TYPE(ucs_topo_groups_sys_dev_array_t, size_t,
                        ucs_sys_device_t);
 
 
-static int
-ucs_topo_groups_sys_dev_cmp(const void *elem1, const void *elem2, void *arg)
+static int ucs_topo_groups_sys_dev_cmp(const void *elem1, const void *elem2,
+                                       void *UCS_V_UNUSED arg)
 {
-    const ucs_topo_sys_device_info_t *devices = arg;
     ucs_sys_device_t sys_dev1 = *(const ucs_sys_device_t*)elem1;
     ucs_sys_device_t sys_dev2 = *(const ucs_sys_device_t*)elem2;
-    ucs_bus_id_bit_rep_t bus_id1, bus_id2;
-    uintptr_t user_value1, user_value2;
 
-    bus_id1 = ucs_topo_get_bus_id_bit_repr(&devices[sys_dev1].bus_id);
-    bus_id2 = ucs_topo_get_bus_id_bit_repr(&devices[sys_dev2].bus_id);
-
-    if (bus_id1 != bus_id2) {
-        return (bus_id1 > bus_id2) - (bus_id1 < bus_id2);
-    }
-
-    user_value1 = devices[sys_dev1].user_value;
-    user_value2 = devices[sys_dev2].user_value;
-
-    return (user_value1 > user_value2) - (user_value1 < user_value2);
+    return ucs_topo_sys_dev_cmp_nolock(sys_dev1, sys_dev2);
 }
 
 static void
-ucs_topo_groups_sys_dev_sort(ucs_topo_groups_sys_dev_array_t *sys_devs,
-                             const ucs_topo_sys_device_info_t *devices)
+ucs_topo_groups_sys_dev_sort(ucs_topo_groups_sys_dev_array_t *sys_devs)
 {
     ucs_assert(sys_devs != NULL);
-    ucs_assert(devices != NULL);
 
     if (ucs_array_is_empty(sys_devs)) {
         return;
@@ -70,7 +55,7 @@ ucs_topo_groups_sys_dev_sort(ucs_topo_groups_sys_dev_array_t *sys_devs,
 
     ucs_qsort_r(ucs_array_begin(sys_devs), ucs_array_length(sys_devs),
                 sizeof(*ucs_array_begin(sys_devs)), ucs_topo_groups_sys_dev_cmp,
-                (void*)devices);
+                NULL);
 }
 
 /* Compact the array by removing unknown devices. */
@@ -419,8 +404,8 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
         goto err_free_arrays;
     }
 
-    ucs_topo_groups_sys_dev_sort(&acc_devices, devices);
-    ucs_topo_groups_sys_dev_sort(&net_devices, devices);
+    ucs_topo_groups_sys_dev_sort(&acc_devices);
+    ucs_topo_groups_sys_dev_sort(&net_devices);
 
     /* TODO: Remove this filter when NVML duplicates issue is fixed. */
     ucs_topo_groups_gpu_aliases_filter(&acc_devices, devices);

@@ -48,6 +48,15 @@ typedef struct {
 
 
 /**
+ * Compare two system devices by their topology identity.
+ *
+ * The topology lock must be held by the caller.
+ */
+int ucs_topo_sys_dev_cmp_nolock(ucs_sys_device_t sys_dev1,
+                                ucs_sys_device_t sys_dev2);
+
+
+/**
  * Convert a PCI bus id to its canonical sysfs path.
  *
  * @param [in]  bus_id  Device PCI bus id.
