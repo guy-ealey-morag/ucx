@@ -377,7 +377,7 @@ void ucs_topo_init_group(ucs_topo_group_t *group)
     ucs_array_init_dynamic(&group->nics);
 }
 
-void ucs_topo_init_groups(ucs_topo_groups_t *groups)
+static void ucs_topo_init_groups(ucs_topo_groups_t *groups)
 {
     groups->type = UCS_TOPO_GROUPS_TYPE_UNKNOWN;
     ucs_array_init_dynamic(&groups->groups);
@@ -449,8 +449,9 @@ ucs_topo_groups_build_groups(const ucs_topo_group_t *inventory,
                              ucs_topo_groups_t *groups)
 {
     (void)inventory;
-    (void)groups_type;
     (void)groups;
+
+    groups->type = groups_type;
 
     /* TODO: Build groups from inventory. */
 
