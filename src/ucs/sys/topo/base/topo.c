@@ -274,18 +274,10 @@ int ucs_topo_sys_dev_cmp_nolock(ucs_sys_device_t sys_dev1,
     const ucs_topo_sys_device_info_t *device1, *device2;
     ucs_bus_id_bit_rep_t bus_id1, bus_id2;
 
-    ucs_assertv((sys_dev1 == UCS_SYS_DEVICE_ID_UNKNOWN) ||
-                        (sys_dev1 < ucs_topo_global_ctx.num_devices),
+    ucs_assertv(sys_dev1 < ucs_topo_global_ctx.num_devices,
                 "invalid sys_dev1: %u", sys_dev1);
-    ucs_assertv((sys_dev2 == UCS_SYS_DEVICE_ID_UNKNOWN) ||
-                        (sys_dev2 < ucs_topo_global_ctx.num_devices),
+    ucs_assertv(sys_dev2 < ucs_topo_global_ctx.num_devices,
                 "invalid sys_dev2: %u", sys_dev2);
-
-    /* Unknown devices are ordered after all registered devices. */
-    if ((sys_dev1 == UCS_SYS_DEVICE_ID_UNKNOWN) ||
-        (sys_dev2 == UCS_SYS_DEVICE_ID_UNKNOWN)) {
-        return (sys_dev1 > sys_dev2) - (sys_dev1 < sys_dev2);
-    }
 
     device1 = &ucs_topo_global_ctx.devices[sys_dev1];
     device2 = &ucs_topo_global_ctx.devices[sys_dev2];

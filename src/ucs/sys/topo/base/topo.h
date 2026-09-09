@@ -41,7 +41,7 @@ BEGIN_C_DECLS
     (unsigned)(_bus_id)->domain, (unsigned)(_bus_id)->bus, \
             (unsigned)(_bus_id)->slot, (unsigned)(_bus_id)->function
 
-/* Bus ID string formatting (abbreviated) */
+/* Bus ID string formatting without the domain */
 #define UCS_SYS_BUS_ID_ABBREVIATED_FMT "%02x:%02x.%u"
 #define UCS_SYS_BUS_ID_ABBREVIATED_ARG(_bus_id) \
     (unsigned)(_bus_id)->bus, (unsigned)(_bus_id)->slot, \
@@ -279,8 +279,7 @@ ucs_topo_get_bus_id_bit_repr(const ucs_sys_bus_id_t *bus_id);
  * Compare two system devices by their topology identity.
  *
  * Registered devices are ordered by PCI bus id, then by user-defined value.
- * @ref UCS_SYS_DEVICE_ID_UNKNOWN is ordered after all registered devices.
- * Other device identifiers must be valid and registered.
+ * Device identifiers must be valid and registered (not UNKNOWN).
  *
  * @param [in] sys_dev1  First system device.
  * @param [in] sys_dev2  Second system device.

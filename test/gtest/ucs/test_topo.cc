@@ -15,6 +15,7 @@ extern "C" {
 #include <ucs/memory/numa.h>
 #include <ucs/sys/sys.h>
 #include <ucs/sys/topo/base/topo.h>
+#include <ucs/algorithm/qsort_r.h>
 }
 
 static std::string get_sysfs_device_path(const std::string &bdf)
@@ -55,6 +56,15 @@ topo_test_mem_dist_cpuset(ucs_sys_device_t, const ucs_cpu_set_t *,
                           ucs_sys_dev_distance_t *distance)
 {
     *distance = ucs_topo_default_distance;
+}
+
+static int topo_test_sys_dev_cmp(const void *elem1, const void *elem2,
+                                 void *UCS_V_UNUSED arg)
+{
+    const auto sys_dev1 = *static_cast<const ucs_sys_device_t*>(elem1);
+    const auto sys_dev2 = *static_cast<const ucs_sys_device_t*>(elem2);
+
+    return ucs_topo_sys_dev_cmp(sys_dev1, sys_dev2);
 }
 
 class test_topo : public ucs::test {
@@ -200,17 +210,16 @@ UCS_TEST_F(test_topo, sys_dev_cmp) {
     EXPECT_LT(ucs_topo_sys_dev_cmp(dev1_alias2, dev1), 0);
     EXPECT_LT(ucs_topo_sys_dev_cmp(dev2_alias1, dev2), 0);
 
-    /* Unknown devices compare equal to each other. */
-    EXPECT_EQ(0, ucs_topo_sys_dev_cmp(UCS_SYS_DEVICE_ID_UNKNOWN,
-                                      UCS_SYS_DEVICE_ID_UNKNOWN));
+    /* Validate sorting order. */
+    std::vector<ucs_sys_device_t> sys_devs = {dev2, dev1, dev2_alias1,
+                                              dev1_alias2, dev1_alias1};
 
-    /* Unknown devices sort last. */
-    for (unsigned i = 0; i < ucs_topo_num_devices(); ++i) {
-        const auto sys_dev = static_cast<ucs_sys_device_t>(i);
+    ucs_qsort_r(sys_devs.data(), sys_devs.size(), sizeof(sys_devs[0]),
+                topo_test_sys_dev_cmp, NULL);
 
-        EXPECT_LT(ucs_topo_sys_dev_cmp(sys_dev, UCS_SYS_DEVICE_ID_UNKNOWN), 0);
-        EXPECT_GT(ucs_topo_sys_dev_cmp(UCS_SYS_DEVICE_ID_UNKNOWN, sys_dev), 0);
-    }
+    const std::vector<ucs_sys_device_t> expected = {dev1_alias1, dev1_alias2,
+                                                    dev1, dev2_alias1, dev2};
+    EXPECT_EQ(expected, sys_devs);
 }
 
 UCS_TEST_F(test_topo, pci_id_equal) {
