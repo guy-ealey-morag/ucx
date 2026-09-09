@@ -56,13 +56,28 @@ ucs_topo_groups_sys_dev_sort(ucs_topo_groups_sys_dev_array_t *sys_devs)
                 NULL);
 }
 
+/* Compare two bus ids up to their slot (excluding the function). */
+static int ucs_topo_groups_bus_id_same_slot(const ucs_sys_bus_id_t *bus_id1,
+                                            const ucs_sys_bus_id_t *bus_id2)
+{
+    return (bus_id1->domain == bus_id2->domain) &&
+           (bus_id1->bus == bus_id2->bus) && (bus_id1->slot == bus_id2->slot);
+}
+
+/* Compare two bus ids. */
+static int ucs_topo_groups_bus_id_equal(const ucs_sys_bus_id_t *bus_id1,
+                                        const ucs_sys_bus_id_t *bus_id2)
+{
+    return ucs_topo_groups_bus_id_same_slot(bus_id1, bus_id2) &&
+           (bus_id1->function == bus_id2->function);
+}
+
 /* This filter is required because currently CUDA gpus may have duplicates in
  * the devices array due to duplicate insertion by NVML and the CUDA driver. */
 static void
 ucs_topo_groups_gpu_aliases_filter(const ucs_topo_sys_device_info_t *devices,
                                    ucs_topo_groups_sys_dev_array_t *gpus)
 {
-    ucs_bus_id_bit_rep_t bus_id1, bus_id2;
     ucs_sys_device_t sys_dev1, sys_dev2;
     size_t src, dst, i;
 
@@ -75,10 +90,8 @@ ucs_topo_groups_gpu_aliases_filter(const ucs_topo_sys_device_info_t *devices,
         sys_dev1 = ucs_array_elem(gpus, i);
         sys_dev2 = ucs_array_elem(gpus, i + 1);
 
-        bus_id1 = ucs_topo_get_bus_id_bit_repr(&devices[sys_dev1].bus_id);
-        bus_id2 = ucs_topo_get_bus_id_bit_repr(&devices[sys_dev2].bus_id);
-
-        if ((bus_id1 == bus_id2) &&
+        if (ucs_topo_groups_bus_id_equal(&devices[sys_dev1].bus_id,
+                                         &devices[sys_dev2].bus_id) &&
             (devices[sys_dev2].user_value == UCS_SYS_DEVICE_USER_VALUE_EMPTY)) {
             /* Mark the device as unknown to be removed later. */
             ucs_array_elem(gpus, i + 1) = UCS_SYS_DEVICE_ID_UNKNOWN;
@@ -268,22 +281,6 @@ ucs_topo_groups_devices_collect(const ucs_topo_sys_device_info_t *devices,
     return UCS_OK;
 }
 
-/* Compare two bus ids up to their slot (excluding the function). */
-static int ucs_topo_groups_bus_id_same_slot(const ucs_sys_bus_id_t *bus_id1,
-                                            const ucs_sys_bus_id_t *bus_id2)
-{
-    return (bus_id1->domain == bus_id2->domain) &&
-           (bus_id1->bus == bus_id2->bus) && (bus_id1->slot == bus_id2->slot);
-}
-
-/* Compare two bus ids. */
-static int ucs_topo_groups_bus_id_equal(const ucs_sys_bus_id_t *bus_id1,
-                                        const ucs_sys_bus_id_t *bus_id2)
-{
-    return ucs_topo_groups_bus_id_same_slot(bus_id1, bus_id2) &&
-           (bus_id1->function == bus_id2->function);
-}
-
 static int ucs_topo_groups_bus_id_match(ucs_topo_device_class_t device_class,
                                         const ucs_sys_bus_id_t *bus_id1,
                                         const ucs_sys_bus_id_t *bus_id2)
@@ -344,6 +341,13 @@ void ucs_topo_init_group(ucs_topo_group_t *group)
 {
     ucs_array_init_dynamic(&group->gpus);
     ucs_array_init_dynamic(&group->nics);
+}
+
+void ucs_topo_release_group(ucs_topo_group_t *group)
+{
+    ucs_assert(group != NULL);
+    ucs_array_cleanup_dynamic(&group->nics);
+    ucs_array_cleanup_dynamic(&group->gpus);
 }
 
 static void ucs_topo_init_groups(ucs_topo_groups_t *groups)

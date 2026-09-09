@@ -12,10 +12,11 @@
 #include <unistd.h>
 
 extern "C" {
+#include <ucs/algorithm/qsort_r.h>
 #include <ucs/memory/numa.h>
 #include <ucs/sys/sys.h>
 #include <ucs/sys/topo/base/topo.h>
-#include <ucs/algorithm/qsort_r.h>
+#include <ucs/sys/topo/base/topo_groups.h>
 }
 
 static std::string get_sysfs_device_path(const std::string &bdf)
@@ -58,13 +59,13 @@ topo_test_mem_dist_cpuset(ucs_sys_device_t, const ucs_cpu_set_t *,
     *distance = ucs_topo_default_distance;
 }
 
-static int topo_test_sys_dev_cmp(const void *elem1, const void *elem2,
-                                 void *UCS_V_UNUSED arg)
+static int topo_test_sys_device_cmp(const void *elem1, const void *elem2,
+                                    void *UCS_V_UNUSED arg)
 {
     const auto sys_dev1 = *static_cast<const ucs_sys_device_t*>(elem1);
     const auto sys_dev2 = *static_cast<const ucs_sys_device_t*>(elem2);
 
-    return ucs_topo_sys_dev_cmp(sys_dev1, sys_dev2);
+    return ucs_topo_sys_device_cmp(sys_dev1, sys_dev2);
 }
 
 class test_topo : public ucs::test {
@@ -178,7 +179,7 @@ UCS_TEST_F(test_topo, find_device_by_bus_id) {
     EXPECT_GE(ucs_topo_num_devices(), 2);
 }
 
-UCS_TEST_F(test_topo, sys_dev_cmp) {
+UCS_TEST_F(test_topo, sys_device_cmp) {
     static const uintptr_t user_value1 = 17;
     static const uintptr_t user_value2 = 42;
     const ucs_sys_bus_id_t bus_id1     = {0, 1, 2, 0};
@@ -198,24 +199,24 @@ UCS_TEST_F(test_topo, sys_dev_cmp) {
                                                                 &dev2_alias1));
 
     /* Identical devices compare equal; BDF is the primary key. */
-    EXPECT_EQ(0, ucs_topo_sys_dev_cmp(dev1, dev1));
-    EXPECT_LT(ucs_topo_sys_dev_cmp(dev1, dev2), 0);
-    EXPECT_GT(ucs_topo_sys_dev_cmp(dev2, dev1), 0);
-    EXPECT_LT(ucs_topo_sys_dev_cmp(dev1_alias2, dev2_alias1), 0);
-    EXPECT_GT(ucs_topo_sys_dev_cmp(dev2_alias1, dev1_alias2), 0);
+    EXPECT_EQ(0, ucs_topo_sys_device_cmp(dev1, dev1));
+    EXPECT_LT(ucs_topo_sys_device_cmp(dev1, dev2), 0);
+    EXPECT_GT(ucs_topo_sys_device_cmp(dev2, dev1), 0);
+    EXPECT_LT(ucs_topo_sys_device_cmp(dev1_alias2, dev2_alias1), 0);
+    EXPECT_GT(ucs_topo_sys_device_cmp(dev2_alias1, dev1_alias2), 0);
 
     /* User value breaks BDF ties; the empty value sorts last. */
-    EXPECT_LT(ucs_topo_sys_dev_cmp(dev1_alias1, dev1_alias2), 0);
-    EXPECT_GT(ucs_topo_sys_dev_cmp(dev1_alias2, dev1_alias1), 0);
-    EXPECT_LT(ucs_topo_sys_dev_cmp(dev1_alias2, dev1), 0);
-    EXPECT_LT(ucs_topo_sys_dev_cmp(dev2_alias1, dev2), 0);
+    EXPECT_LT(ucs_topo_sys_device_cmp(dev1_alias1, dev1_alias2), 0);
+    EXPECT_GT(ucs_topo_sys_device_cmp(dev1_alias2, dev1_alias1), 0);
+    EXPECT_LT(ucs_topo_sys_device_cmp(dev1_alias2, dev1), 0);
+    EXPECT_LT(ucs_topo_sys_device_cmp(dev2_alias1, dev2), 0);
 
     /* Validate sorting order. */
     std::vector<ucs_sys_device_t> sys_devs = {dev2, dev1, dev2_alias1,
                                               dev1_alias2, dev1_alias1};
 
     ucs_qsort_r(sys_devs.data(), sys_devs.size(), sizeof(sys_devs[0]),
-                topo_test_sys_dev_cmp, NULL);
+                topo_test_sys_device_cmp, NULL);
 
     const std::vector<ucs_sys_device_t> expected = {dev1_alias1, dev1_alias2,
                                                     dev1, dev2_alias1, dev2};

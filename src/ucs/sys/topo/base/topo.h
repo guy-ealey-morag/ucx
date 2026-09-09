@@ -287,7 +287,8 @@ ucs_topo_get_bus_id_bit_repr(const ucs_sys_bus_id_t *bus_id);
  * @return A negative value if @a sys_dev1 precedes @a sys_dev2, a positive
  *         value if @a sys_dev2 precedes @a sys_dev1, or zero if equal.
  */
-int ucs_topo_sys_dev_cmp(ucs_sys_device_t sys_dev1, ucs_sys_device_t sys_dev2);
+int ucs_topo_sys_device_cmp(ucs_sys_device_t sys_dev1,
+                            ucs_sys_device_t sys_dev2);
 
 
 /**

@@ -64,7 +64,7 @@ static int ucp_proto_multi_sys_dev_cmp(const void *pa, const void *pb,
     ucs_sys_device_t sys_dev1 = *(const ucs_sys_device_t*)pa;
     ucs_sys_device_t sys_dev2 = *(const ucs_sys_device_t*)pb;
 
-    return ucs_topo_sys_dev_cmp(sys_dev1, sys_dev2);
+    return ucs_topo_sys_device_cmp(sys_dev1, sys_dev2);
 }
 
 static ucp_lane_index_t ucp_proto_multi_find_max_avail_bw_lane(

@@ -295,7 +295,8 @@ int ucs_topo_sys_dev_cmp_nolock(ucs_sys_device_t sys_dev1,
            (device1->user_value < device2->user_value);
 }
 
-int ucs_topo_sys_dev_cmp(ucs_sys_device_t sys_dev1, ucs_sys_device_t sys_dev2)
+int ucs_topo_sys_device_cmp(ucs_sys_device_t sys_dev1,
+                            ucs_sys_device_t sys_dev2)
 {
     int result;
 
@@ -1419,13 +1420,6 @@ ucs_status_t ucs_topo_build_groups(ucs_topo_groups_t *groups_p)
     ucs_spin_unlock(&ucs_topo_global_ctx.lock);
 
     return status;
-}
-
-void ucs_topo_release_group(ucs_topo_group_t *group)
-{
-    ucs_assert(group != NULL);
-    ucs_array_cleanup_dynamic(&group->nics);
-    ucs_array_cleanup_dynamic(&group->gpus);
 }
 
 void ucs_topo_release_groups(ucs_topo_groups_t *groups)
