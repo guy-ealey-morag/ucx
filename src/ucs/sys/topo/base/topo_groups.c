@@ -277,7 +277,7 @@ static int ucs_topo_groups_bus_id_match(ucs_topo_device_class_t device_class,
                                         const ucs_sys_bus_id_t *bus_id1,
                                         const ucs_sys_bus_id_t *bus_id2)
 {
-    if (UCS_TOPO_DEVICE_CLASS_ACC) {
+    if (device_class == UCS_TOPO_DEVICE_CLASS_ACC) {
         /* Accelerator devices (GPUs) are grouped by full bus id equality. */
         return ucs_topo_groups_bus_id_equal(bus_id1, bus_id2);
     }
