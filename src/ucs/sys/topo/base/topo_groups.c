@@ -292,7 +292,7 @@ static int ucs_topo_groups_bus_id_match(ucs_topo_device_class_t device_class,
 }
 
 static ucs_status_t
-ucs_topo_groups_devices_build(const ucs_topo_sys_device_info_t *devices,
+ucs_topo_groups_elements_build(const ucs_topo_sys_device_info_t *devices,
                               const ucs_topo_groups_sys_dev_array_t *sys_devices,
                               const ucs_topo_device_class_t device_class,
                               ucs_topo_group_element_array_t *elements)
@@ -392,14 +392,14 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
         ucs_topo_groups_nics_cx9_filter(devices, &net_devices);
     }
 
-    status = ucs_topo_groups_devices_build(devices, &acc_devices,
+    status = ucs_topo_groups_elements_build(devices, &acc_devices,
                                            UCS_TOPO_DEVICE_CLASS_ACC,
                                            &inventory.gpus);
     if (status != UCS_OK) {
         goto err_free_arrays;
     }
 
-    status = ucs_topo_groups_devices_build(devices, &net_devices,
+    status = ucs_topo_groups_elements_build(devices, &net_devices,
                                            UCS_TOPO_DEVICE_CLASS_NET,
                                            &inventory.nics);
     if (status != UCS_OK) {
