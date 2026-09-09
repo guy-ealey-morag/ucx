@@ -12,7 +12,7 @@
 
 BEGIN_C_DECLS
 
-#define UCS_TOPO_MAX_DEVICES_PER_ELEMENT 8
+#define UCS_TOPO_MAX_SYS_DEVS_PER_ELEMENT 8
 
 
 /**
@@ -30,8 +30,8 @@ typedef enum {
  * Physical device represented in a topology group.
  */
 typedef struct {
-    ucs_sys_device_t devices[UCS_TOPO_MAX_DEVICES_PER_ELEMENT];
-    size_t           num_devices;
+    ucs_sys_device_t sys_devs[UCS_TOPO_MAX_SYS_DEVS_PER_ELEMENT];
+    size_t           num_sys_devs;
 } ucs_topo_group_element_t;
 
 

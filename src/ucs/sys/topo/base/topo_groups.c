@@ -317,13 +317,13 @@ ucs_topo_groups_devices_build(const ucs_topo_sys_device_info_t *devices,
             prev_bus_id = bus_id;
         }
 
-        if (element->num_devices >= UCS_TOPO_MAX_DEVICES_PER_ELEMENT) {
+        if (element->num_sys_devs >= UCS_TOPO_MAX_SYS_DEVS_PER_ELEMENT) {
             ucs_error("too many devices (%zu) with bus id " UCS_SYS_BUS_ID_FMT,
-                      element->num_devices, UCS_SYS_BUS_ID_ARG(bus_id));
+                      element->num_sys_devs, UCS_SYS_BUS_ID_ARG(bus_id));
             return UCS_ERR_EXCEEDS_LIMIT;
         }
 
-        element->devices[element->num_devices++] = *sys_dev;
+        element->sys_devs[element->num_sys_devs++] = *sys_dev;
     }
 
     return UCS_OK;
