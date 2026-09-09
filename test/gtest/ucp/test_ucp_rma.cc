@@ -267,6 +267,62 @@ protected:
                            rkey, param);
     }
 
+    void test_iov_multi_buffer(ucp_operation_id_t op_id)
+    {
+        static constexpr size_t elem_size = 4 * UCS_KBYTE;
+        static constexpr size_t iov_count = 3;
+        const size_t total_size           = iov_count * elem_size;
+        std::vector<mapped_buffer> local_buffers;
+        mapped_buffer remote_buffer(total_size, receiver());
+        ucs::handle<ucp_rkey_h> rkey = remote_buffer.rkey(sender());
+        ucp_dt_iov_t iov[iov_count];
+        ucp_request_param_t param = {};
+        ucs_status_ptr_t status_ptr;
+
+        local_buffers.reserve(iov_count);
+        for (size_t i = 0; i < iov_count; ++i) {
+            local_buffers.emplace_back(elem_size, sender(), 0,
+                                       UCS_MEMORY_TYPE_CUDA);
+            iov[i].buffer = local_buffers[i].ptr();
+            iov[i].length = elem_size;
+
+            if (op_id == UCP_OP_ID_PUT) {
+                local_buffers[i].memset(static_cast<uint8_t>(i + 1));
+            } else {
+                local_buffers[i].memset(0);
+                mem_buffer::pattern_fill(
+                        UCS_PTR_BYTE_OFFSET(remote_buffer.ptr(), i * elem_size),
+                        elem_size, static_cast<uint8_t>(i + 1));
+            }
+        }
+
+        if (op_id == UCP_OP_ID_PUT) {
+            remote_buffer.memset(0);
+        }
+
+        param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE;
+        param.datatype     = DATATYPE_IOV;
+        if (op_id == UCP_OP_ID_PUT) {
+            status_ptr = ucp_put_nbx(sender().ep(), iov, iov_count,
+                                     (uintptr_t)remote_buffer.ptr(), rkey,
+                                     &param);
+        } else {
+            status_ptr = ucp_get_nbx(sender().ep(), iov, iov_count,
+                                     (uintptr_t)remote_buffer.ptr(), rkey,
+                                     &param);
+        }
+
+        ASSERT_UCS_OK(request_wait(status_ptr));
+        flush_ep(sender());
+
+        for (size_t i = 0; i < iov_count; ++i) {
+            EXPECT_TRUE(mem_buffer::compare(
+                    local_buffers[i].ptr(),
+                    UCS_PTR_BYTE_OFFSET(remote_buffer.ptr(), i * elem_size),
+                    elem_size, UCS_MEMORY_TYPE_CUDA, UCS_MEMORY_TYPE_HOST));
+        }
+    }
+
     bool is_ep_flush() {
         return get_variant_value() & FLUSH_EP;
     }
@@ -310,6 +366,53 @@ UCS_TEST_SKIP_COND_P(test_ucp_rma, get_nonblocking_iov_zcopy,
 
     test_mem_types(static_cast<send_func_t>(&test_ucp_rma::get_nbi_iov), 2000,
                    64 * UCS_KBYTE);
+}
+
+UCS_TEST_SKIP_COND_P(test_ucp_rma, put_iov_zcopy_multi_buffer_cuda,
+                     !mem_buffer::is_mem_type_supported(UCS_MEMORY_TYPE_CUDA),
+                     "ZCOPY_THRESH=0")
+{
+    if (!sender().has_lane_with_caps(UCT_IFACE_FLAG_PUT_ZCOPY)) {
+        UCS_TEST_SKIP_R("put_zcopy is not supported");
+    }
+
+    test_iov_multi_buffer(UCP_OP_ID_PUT);
+}
+
+UCS_TEST_SKIP_COND_P(test_ucp_rma, get_iov_zcopy_multi_buffer_cuda,
+                     !mem_buffer::is_mem_type_supported(UCS_MEMORY_TYPE_CUDA),
+                     "ZCOPY_THRESH=0")
+{
+    if (!sender().has_lane_with_caps(UCT_IFACE_FLAG_GET_ZCOPY)) {
+        UCS_TEST_SKIP_R("get_zcopy is not supported");
+    }
+
+    test_iov_multi_buffer(UCP_OP_ID_GET);
+}
+
+UCS_TEST_SKIP_COND_P(test_ucp_rma, put_iov_heterogeneous_mem_types,
+                     !ENABLE_PARAMS_CHECK || !mem_buffer::is_mem_type_supported(
+                                                     UCS_MEMORY_TYPE_CUDA),
+                     "ZCOPY_THRESH=0")
+{
+    static constexpr size_t elem_size = 4 * UCS_KBYTE;
+    mapped_buffer host_buffer(elem_size, sender());
+    mapped_buffer cuda_buffer(elem_size, sender(), 0, UCS_MEMORY_TYPE_CUDA);
+    mapped_buffer remote_buffer(2 * elem_size, receiver());
+    ucs::handle<ucp_rkey_h> rkey = remote_buffer.rkey(sender());
+    ucp_dt_iov_t iov[]           = {{host_buffer.ptr(), elem_size},
+                                    {cuda_buffer.ptr(), elem_size}};
+    ucp_request_param_t param    = {};
+
+    param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE;
+    param.datatype     = DATATYPE_IOV;
+
+    scoped_log_handler wrap_err(wrap_errors_logger);
+    ucs_status_ptr_t status_ptr = ucp_put_nbx(sender().ep(), iov,
+                                              ucs_static_array_size(iov),
+                                              (uintptr_t)remote_buffer.ptr(),
+                                              rkey, &param);
+    EXPECT_EQ(UCS_ERR_INVALID_PARAM, UCS_PTR_STATUS(status_ptr));
 }
 
 UCS_TEST_P(test_ucp_rma, get_blocking_zcopy, "ZCOPY_THRESH=0") {
@@ -1018,8 +1121,7 @@ public:
             UCS_TEST_SKIP_R("sporadic failure on CUDA memory type");
         }
 
-        modify_config("MAX_RMA_RAILS", "2");
-        test_ucp_rma::init();
+        init_sgl_test();
     }
 
     ucs_memory_type_t mem_type() const {
@@ -1027,6 +1129,12 @@ public:
     }
 
 protected:
+    void init_sgl_test()
+    {
+        modify_config("MAX_RMA_RAILS", "2");
+        test_ucp_rma::init();
+    }
+
     enum sgl_op_t {
         SGL_OP_PUT,
         SGL_OP_GET
@@ -1371,6 +1479,20 @@ protected:
     }
 };
 
+class test_ucp_rma_sgl_cuda : public test_ucp_rma_sgl {
+public:
+    static void get_test_variants(std::vector<ucp_test_variant> &variants)
+    {
+        add_variant_memtypes(variants, get_base_variants,
+                             UCS_BIT(UCS_MEMORY_TYPE_CUDA));
+    }
+
+    virtual void init() override
+    {
+        init_sgl_test();
+    }
+};
+
 UCS_TEST_P(test_ucp_rma_sgl, put_various_counts) {
     static const size_t counts[] = {1, 2, 4, 10, 1024};
     for (size_t count : counts) {
@@ -1666,4 +1788,31 @@ UCS_TEST_SKIP_COND_P(test_ucp_rma_sgl, put_without_proto,
             REMOTE_MASK_DEFAULT, 2, UCS_ERR_UNSUPPORTED);
 }
 
+UCS_TEST_P(test_ucp_rma_sgl_cuda, put_detected_memory)
+{
+    test_put_sgl(4, 2 * UCS_KBYTE, false);
+}
+
+UCS_TEST_P(test_ucp_rma_sgl_cuda, put_supplied_memhs)
+{
+    test_put_sgl(4, 2 * UCS_KBYTE);
+}
+
+UCS_TEST_SKIP_COND_P(test_ucp_rma_sgl_cuda,
+                     put_heterogeneous_mem_types_rejected, !ENABLE_PARAMS_CHECK)
+{
+    sgl_ctx detected_ctx;
+    init_sgl_ctx_mixed_mem_types(detected_ctx);
+    expect_sgl_put_invalid_param_ctx(detected_ctx, LOCAL_MASK_DEFAULT,
+                                     REMOTE_MASK_DEFAULT, 2);
+
+    sgl_ctx memhs_ctx;
+    init_sgl_ctx_mixed_mem_types(memhs_ctx);
+    expect_sgl_put_invalid_param_ctx(memhs_ctx,
+                                     LOCAL_MASK_DEFAULT |
+                                             UCP_DT_LOCAL_SGL_FIELD_MEMHS,
+                                     REMOTE_MASK_DEFAULT, 2);
+}
+
 UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_rma_sgl, all, "all")
+UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_rma_sgl_cuda, all, "all")

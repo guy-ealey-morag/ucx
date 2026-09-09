@@ -313,6 +313,7 @@ ucs_status_ptr_t ucp_get_nbx(ucp_ep_h ep, void *buffer, size_t count,
     }
 
     datatype = ucp_request_param_datatype(param);
+    /* TODO: Add SGL GET support when a corresponding protocol is implemented. */
     req      = ucp_request_get_param(worker, param,
                                      {ret = UCS_STATUS_PTR(UCS_ERR_NO_MEMORY);
                                      goto out_unlock;});
