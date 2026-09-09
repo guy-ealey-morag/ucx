@@ -1029,20 +1029,57 @@ ucp_proto_rndv_rtr_req_send_atp_err(ucp_ep_h ep,
                           "send_atp_err");
 }
 
+ucp_memory_info_t
+ucp_proto_rndv_rtr_req_detect_mem_info(ucp_context_h context,
+                                       const ucp_rndv_rtr_req_hdr_t *rtr_req)
+{
+    const void *address = (void*)(uintptr_t)rtr_req->address;
+    ucp_memory_info_t mem_info;
+    ucs_memory_info_t slow_mem_info;
+    int mem_type_mismatch;
+    int sys_dev_mismatch;
+
+    ucp_memory_detect(context, address, rtr_req->super.size, &mem_info);
+    mem_type_mismatch = (mem_info.type != UCS_MEMORY_TYPE_UNKNOWN) &&
+                        (rtr_req->mem_type != UCS_MEMORY_TYPE_UNKNOWN) &&
+                        (mem_info.type != rtr_req->mem_type);
+    sys_dev_mismatch  = (mem_info.sys_dev != UCS_SYS_DEVICE_ID_UNKNOWN) &&
+                        (rtr_req->sys_dev != UCS_SYS_DEVICE_ID_UNKNOWN) &&
+                        (mem_info.sys_dev != rtr_req->sys_dev);
+
+    /* Verify a cache result that is incomplete or conflicts with the wire. */
+    if ((((mem_info.type == UCS_MEMORY_TYPE_HOST) ||
+          (mem_info.type == UCS_MEMORY_TYPE_UNKNOWN)) &&
+         (rtr_req->mem_type != UCS_MEMORY_TYPE_HOST) &&
+         (rtr_req->mem_type != UCS_MEMORY_TYPE_UNKNOWN)) ||
+        mem_type_mismatch || sys_dev_mismatch) {
+        ucp_memory_detect_slowpath(context, address, rtr_req->super.size,
+                                   &slow_mem_info);
+        mem_info.type    = slow_mem_info.type;
+        mem_info.sys_dev = slow_mem_info.sys_dev;
+        mem_info.flags   = slow_mem_info.mem_flags;
+    }
+
+    ucs_assertv((mem_info.type == UCS_MEMORY_TYPE_UNKNOWN) ||
+                        (rtr_req->mem_type == UCS_MEMORY_TYPE_UNKNOWN) ||
+                        (mem_info.type == rtr_req->mem_type),
+                "rtr_req local mem_type %u != wire mem_type %u", mem_info.type,
+                rtr_req->mem_type);
+    ucs_assertv((mem_info.sys_dev == UCS_SYS_DEVICE_ID_UNKNOWN) ||
+                        (rtr_req->sys_dev == UCS_SYS_DEVICE_ID_UNKNOWN) ||
+                        (mem_info.sys_dev == rtr_req->sys_dev),
+                "rtr_req local sys_dev %u != wire sys_dev %u", mem_info.sys_dev,
+                rtr_req->sys_dev);
+    return mem_info;
+}
+
 static void
 ucp_proto_rndv_rtr_req_sreq_init(ucp_ep_h ep, ucp_request_t *req,
                                  const ucp_rndv_rtr_req_hdr_t *rtr_req)
 {
     const ucp_rndv_rtr_hdr_t *rtr = &rtr_req->super;
-    ucp_memory_info_t mem_info    = {
-        .type    = rtr_req->mem_type,
-        .sys_dev = rtr_req->sys_dev
-    };
-    ucp_memory_info_t local_mem_info;
-
-    ucp_memory_detect(ep->worker->context, (void*)(uintptr_t)rtr_req->address,
-                      rtr->size, &local_mem_info);
-    mem_info.flags = local_mem_info.flags;
+    ucp_memory_info_t mem_info    = ucp_proto_rndv_rtr_req_detect_mem_info(
+            ep->worker->context, rtr_req);
 
     ucp_proto_request_send_init(req, ep,
                                 UCP_REQUEST_FLAG_RNDV_SEND_INTERNAL);
@@ -1050,7 +1087,7 @@ ucp_proto_rndv_rtr_req_sreq_init(ucp_ep_h ep, ucp_request_t *req,
                              ucp_proto_rndv_rtr_req_send_complete);
     req->send.buffer              = (void*)(uintptr_t)rtr_req->address;
     req->send.length              = rtr->size;
-    req->send.mem_type            = rtr_req->mem_type;
+    req->send.mem_type            = mem_info.type;
     req->send.rndv.remote_req_id  = rtr->rreq_id;
     req->send.rndv.rkey           = NULL;
     req->send.rndv.remote_address = rtr_req->address;

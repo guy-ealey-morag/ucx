@@ -1,5 +1,5 @@
 /**
- * Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2021. ALL RIGHTS RESERVED.
+ * Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2021-2026. ALL RIGHTS RESERVED.
  *
  * See file LICENSE for terms.
  */
@@ -225,6 +225,12 @@ void ucp_proto_rndv_receive_start(ucp_worker_h worker, ucp_request_t *recv_req,
 
 ucs_status_t
 ucp_proto_rndv_handle_rtr(void *arg, void *data, size_t length, unsigned flags);
+
+
+ucp_memory_info_t
+ucp_proto_rndv_rtr_req_detect_mem_info(ucp_context_h context,
+                                       const ucp_rndv_rtr_req_hdr_t *rtr_req);
+
 
 ucs_status_t ucp_proto_rndv_send_start(ucp_worker_h worker,
                                        ucp_request_t *req,

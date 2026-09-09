@@ -17,6 +17,7 @@ extern "C" {
 #include <ucp/proto/proto_select.inl>
 #include <ucp/rndv/proto_rndv.h>
 #include <uct/base/uct_iface.h>
+#include <ucs/memory/memtype_cache.h>
 #include <ucs/memory/numa.h>
 #include <ucs/sys/sys.h>
 #include <ucs/sys/topo/base/topo.h>
@@ -3258,6 +3259,21 @@ UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_proto_mock_rcx_gpu_nic, rcx, "rc_x")
 class test_ucp_proto_mock_rcx_gpu_nic_rndv :
     public test_ucp_proto_mock_rcx_gpu_nic {
 protected:
+    ucp_memory_info_t detect_rtr_req_mem_info(const void *address,
+                                              size_t length,
+                                              ucs_memory_type_t wire_mem_type,
+                                              ucs_sys_device_t wire_sys_dev)
+    {
+        ucp_rndv_rtr_req_hdr_t rtr_req = {};
+
+        rtr_req.super.size = length;
+        rtr_req.address    = reinterpret_cast<uintptr_t>(address);
+        rtr_req.mem_type   = wire_mem_type;
+        rtr_req.sys_dev    = wire_sys_dev;
+        return ucp_proto_rndv_rtr_req_detect_mem_info(sender().ucph(),
+                                                      &rtr_req);
+    }
+
     void expect_rndv_protocol_candidates(ucp_operation_id_t op_id,
                                          ucs_memory_type_t mem_type,
                                          ucs_sys_device_t sys_dev,
@@ -3323,6 +3339,98 @@ protected:
 class test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda :
     public test_ucp_proto_mock_rcx_gpu_nic_rndv {
 };
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda,
+           rtr_req_uses_cache_backed_local_identity, "MEMTYPE_CACHE=y")
+{
+    const mem_buffer buffer(1, UCS_MEMORY_TYPE_HOST);
+    const ucp_memory_info_t expected = {
+        .type    = UCS_MEMORY_TYPE_CUDA,
+        .sys_dev = mapped_gpu(),
+        .flags   = UCS_MEM_FLAG_REGISTRABLE
+    };
+    ucp_memory_info_t matching_mem_info;
+    ucp_memory_info_t local_mem_info;
+
+    ucs_memtype_cache_update(buffer.ptr(), buffer.size(),
+                             static_cast<ucs_memory_type_t>(expected.type),
+                             expected.sys_dev, expected.flags);
+    matching_mem_info = detect_rtr_req_mem_info(buffer.ptr(), buffer.size(),
+                                                UCS_MEMORY_TYPE_CUDA,
+                                                mapped_gpu());
+    local_mem_info    = detect_rtr_req_mem_info(buffer.ptr(), buffer.size(),
+                                                UCS_MEMORY_TYPE_UNKNOWN,
+                                                UCS_SYS_DEVICE_ID_UNKNOWN);
+    ucs_memtype_cache_remove(buffer.ptr(), buffer.size());
+
+    EXPECT_TRUE(ucp_memory_info_equal(&expected, &matching_mem_info));
+    EXPECT_TRUE(ucp_memory_info_equal(&expected, &local_mem_info));
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda,
+           rtr_req_local_identity_selects_put_assignment, "MEMTYPE_CACHE=y",
+           "RNDV_THRESH=1", "IB_NUM_PATHS?=1", "MAX_RNDV_LANES=3",
+           "MULTI_LANE_MAX_RATIO=4")
+{
+    const mem_buffer buffer(1, UCS_MEMORY_TYPE_HOST);
+    ucp_memory_info_t mem_info;
+
+    ucs_memtype_cache_update(buffer.ptr(), buffer.size(), UCS_MEMORY_TYPE_CUDA,
+                             mapped_gpu(), UCS_MEM_FLAG_REGISTRABLE);
+    mem_info = detect_rtr_req_mem_info(buffer.ptr(), buffer.size(),
+                                       UCS_MEMORY_TYPE_UNKNOWN,
+                                       UCS_SYS_DEVICE_ID_UNKNOWN);
+    ucs_memtype_cache_remove(buffer.ptr(), buffer.size());
+
+    install_assignment(mapped_gpu(), {nic(2)});
+    expect_rndv_protocol_candidates(
+            UCP_OP_ID_RNDV_SEND, static_cast<ucs_memory_type_t>(mem_info.type),
+            mem_info.sys_dev, "rndv/put/zcopy", {nic(2)});
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda,
+           rtr_req_conflicting_wire_identity_forces_local_detection,
+           "MEMTYPE_CACHE=y")
+{
+    const mem_buffer buffer(1, UCS_MEMORY_TYPE_HOST);
+    ucp_memory_info_t mem_info;
+
+    ucs_memtype_cache_update(buffer.ptr(), buffer.size(), UCS_MEMORY_TYPE_CUDA,
+                             mapped_gpu(), UCS_MEM_FLAG_REGISTRABLE);
+    mem_info = detect_rtr_req_mem_info(buffer.ptr(), buffer.size(),
+                                       UCS_MEMORY_TYPE_UNKNOWN, unmapped_gpu());
+    ucs_memtype_cache_remove(buffer.ptr(), buffer.size());
+
+    EXPECT_EQ(UCS_MEMORY_TYPE_HOST, mem_info.type);
+    EXPECT_EQ(UCS_SYS_DEVICE_ID_UNKNOWN, mem_info.sys_dev);
+    EXPECT_EQ(UCS_MEM_FLAG_REGISTRABLE, mem_info.flags);
+}
+
+UCS_TEST_SKIP_COND_P(test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda,
+                     rtr_req_cuda_cache_miss_forces_slow_detection,
+                     !mem_buffer::is_mem_type_supported(UCS_MEMORY_TYPE_CUDA),
+                     "MEMTYPE_CACHE=y")
+{
+    const mem_buffer buffer(1, UCS_MEMORY_TYPE_CUDA);
+    ucs_memory_info_t slow_mem_info;
+    ucp_memory_info_t mem_info;
+
+    ucp_memory_detect_slowpath(sender().ucph(), buffer.ptr(), buffer.size(),
+                               &slow_mem_info);
+    ASSERT_EQ(UCS_MEMORY_TYPE_CUDA, slow_mem_info.type);
+    ASSERT_NE(UCS_SYS_DEVICE_ID_UNKNOWN, slow_mem_info.sys_dev);
+
+    ucs_memtype_cache_remove(buffer.ptr(), buffer.size());
+    mem_info = detect_rtr_req_mem_info(buffer.ptr(), buffer.size(),
+                                       slow_mem_info.type,
+                                       slow_mem_info.sys_dev);
+    ucs_memtype_cache_update(buffer.ptr(), buffer.size(), slow_mem_info.type,
+                             slow_mem_info.sys_dev, slow_mem_info.mem_flags);
+
+    EXPECT_EQ(slow_mem_info.type, mem_info.type);
+    EXPECT_EQ(slow_mem_info.sys_dev, mem_info.sys_dev);
+    EXPECT_EQ(slow_mem_info.mem_flags, mem_info.flags);
+}
 
 UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_rndv,
            direct_uses_application_assignment, "RNDV_THRESH=1",
