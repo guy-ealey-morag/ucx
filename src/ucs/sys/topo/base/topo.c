@@ -268,8 +268,8 @@ ucs_topo_bus_value_key_make(const ucs_sys_bus_id_t *bus_id,
     return key;
 }
 
-int ucs_topo_sys_dev_cmp_nolock(ucs_sys_device_t sys_dev1,
-                                ucs_sys_device_t sys_dev2)
+int ucs_topo_sys_device_cmp_nolock(ucs_sys_device_t sys_dev1,
+                                   ucs_sys_device_t sys_dev2)
 {
     const ucs_topo_sys_device_info_t *device1, *device2;
     ucs_bus_id_bit_rep_t bus_id1, bus_id2;
@@ -301,7 +301,7 @@ int ucs_topo_sys_device_cmp(ucs_sys_device_t sys_dev1,
     int result;
 
     ucs_spin_lock(&ucs_topo_global_ctx.lock);
-    result = ucs_topo_sys_dev_cmp_nolock(sys_dev1, sys_dev2);
+    result = ucs_topo_sys_device_cmp_nolock(sys_dev1, sys_dev2);
     ucs_spin_unlock(&ucs_topo_global_ctx.lock);
 
     return result;
@@ -1410,6 +1410,7 @@ ucs_status_t ucs_topo_build_groups(ucs_topo_groups_t *groups_p)
 
     if (ucs_arch_get_cpu_model() != UCS_CPU_MODEL_NVIDIA_VERA) {
         /* Currently only Vera Rubin architecture supports topology groups. */
+        ucs_debug("topology groups are not supported on this architecture");
         return UCS_ERR_UNSUPPORTED;
     }
 
@@ -1420,19 +1421,6 @@ ucs_status_t ucs_topo_build_groups(ucs_topo_groups_t *groups_p)
     ucs_spin_unlock(&ucs_topo_global_ctx.lock);
 
     return status;
-}
-
-void ucs_topo_release_groups(ucs_topo_groups_t *groups)
-{
-    size_t i;
-
-    ucs_assert(groups != NULL);
-
-    for (i = 0; i < ucs_array_length(groups); ++i) {
-        ucs_topo_release_group(&ucs_array_elem(groups, i));
-    }
-
-    ucs_array_cleanup_dynamic(groups);
 }
 
 ucs_global_state_t *ucs_topo_extract_state(void)

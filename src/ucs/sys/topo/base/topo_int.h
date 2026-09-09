@@ -52,8 +52,8 @@ typedef struct {
  *
  * The topology lock must be held by the caller.
  */
-int ucs_topo_sys_dev_cmp_nolock(ucs_sys_device_t sys_dev1,
-                                ucs_sys_device_t sys_dev2);
+int ucs_topo_sys_device_cmp_nolock(ucs_sys_device_t sys_dev1,
+                                   ucs_sys_device_t sys_dev2);
 
 
 /**

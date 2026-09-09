@@ -39,7 +39,7 @@ static int ucs_topo_groups_sys_dev_cmp(const void *elem1, const void *elem2,
     ucs_sys_device_t sys_dev1 = *(const ucs_sys_device_t*)elem1;
     ucs_sys_device_t sys_dev2 = *(const ucs_sys_device_t*)elem2;
 
-    return ucs_topo_sys_dev_cmp_nolock(sys_dev1, sys_dev2);
+    return ucs_topo_sys_device_cmp_nolock(sys_dev1, sys_dev2);
 }
 
 static void
@@ -333,6 +333,24 @@ ucs_topo_groups_devices_build(const ucs_topo_sys_device_info_t *devices,
     return UCS_OK;
 }
 
+static void ucs_topo_init_groups(ucs_topo_groups_t *groups)
+{
+    ucs_array_init_dynamic(groups);
+}
+
+void ucs_topo_release_groups(ucs_topo_groups_t *groups)
+{
+    size_t i;
+
+    ucs_assert(groups != NULL);
+
+    for (i = 0; i < ucs_array_length(groups); ++i) {
+        ucs_topo_release_group(&ucs_array_elem(groups, i));
+    }
+
+    ucs_array_cleanup_dynamic(groups);
+}
+
 void ucs_topo_init_group(ucs_topo_group_t *group)
 {
     ucs_array_init_dynamic(&group->gpus);
@@ -344,11 +362,6 @@ void ucs_topo_release_group(ucs_topo_group_t *group)
     ucs_assert(group != NULL);
     ucs_array_cleanup_dynamic(&group->nics);
     ucs_array_cleanup_dynamic(&group->gpus);
-}
-
-static void ucs_topo_init_groups(ucs_topo_groups_t *groups)
-{
-    ucs_array_init_dynamic(groups);
 }
 
 static ucs_status_t
