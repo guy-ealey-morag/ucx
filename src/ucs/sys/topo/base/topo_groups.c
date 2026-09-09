@@ -273,82 +273,57 @@ static int ucs_topo_groups_bus_id_equal(const ucs_sys_bus_id_t *bus_id1,
            (bus_id1->function == bus_id2->function);
 }
 
-static ucs_status_t
-ucs_topo_groups_gpus_build(const ucs_topo_sys_device_info_t *devices,
-                           const ucs_topo_groups_sys_dev_array_t *acc_devices,
-                           ucs_topo_gpu_array_t *gpus)
+static int ucs_topo_groups_bus_id_match(ucs_topo_device_class_t device_class,
+                                        const ucs_sys_bus_id_t *bus_id1,
+                                        const ucs_sys_bus_id_t *bus_id2)
 {
-    const ucs_sys_bus_id_t *gpu_bus_id = NULL;
-    const ucs_sys_bus_id_t *dev_bus_id;
-    const ucs_sys_device_t *sys_dev;
-    ucs_topo_gpu_t *gpu;
-
-    if (ucs_array_is_empty(acc_devices)) {
-        return UCS_OK;
+    if (UCS_TOPO_DEVICE_CLASS_ACC) {
+        /* Accelerator devices (GPUs) are grouped by full bus id equality. */
+        return ucs_topo_groups_bus_id_equal(bus_id1, bus_id2);
     }
 
-    ucs_assert(ucs_array_begin(acc_devices) != NULL);
-
-    ucs_array_for_each(sys_dev, acc_devices) {
-        dev_bus_id = &devices[*sys_dev].bus_id;
-
-        /* Start a new GPU if the bus ids differ. */
-        if ((gpu_bus_id == NULL) ||
-            !ucs_topo_groups_bus_id_equal(gpu_bus_id, dev_bus_id)) {
-            gpu = ucs_array_append(gpus, return UCS_ERR_NO_MEMORY);
-            memset(gpu, 0, sizeof(*gpu));
-            gpu_bus_id = dev_bus_id;
-        }
-
-        if (gpu->num_devices >= UCS_TOPO_MAX_DEVICES_PER_GPU) {
-            ucs_error("too many accelerator devices (%zu) with bus "
-                      "id " UCS_SYS_BUS_ID_FMT,
-                      gpu->num_devices, UCS_SYS_BUS_ID_ARG(dev_bus_id));
-            return UCS_ERR_EXCEEDS_LIMIT;
-        }
-
-        gpu->devices[gpu->num_devices++] = *sys_dev;
-    }
-
-    return UCS_OK;
+    /* Network devices (NICs) are grouped by bdf equality excl. the function. */
+    ucs_assert(device_class == UCS_TOPO_DEVICE_CLASS_NET);
+    return ucs_topo_groups_bus_id_same_slot(bus_id1, bus_id2);
 }
 
 static ucs_status_t
-ucs_topo_groups_nics_build(const ucs_topo_sys_device_info_t *devices,
-                           const ucs_topo_groups_sys_dev_array_t *net_devices,
-                           ucs_topo_nic_array_t *nics)
+ucs_topo_groups_devices_build(const ucs_topo_sys_device_info_t *devices,
+                              const ucs_topo_groups_sys_dev_array_t *sys_devices,
+                              const ucs_topo_device_class_t device_class,
+                              ucs_topo_group_element_array_t *elements)
 {
-    const ucs_sys_bus_id_t *nic_bus_id = NULL;
-    const ucs_sys_bus_id_t *dev_bus_id;
+    const ucs_sys_bus_id_t *prev_bus_id = NULL;
+    const ucs_sys_bus_id_t *bus_id;
     const ucs_sys_device_t *sys_dev;
-    ucs_topo_nic_t *nic;
+    ucs_topo_group_element_t *element;
 
-    if (ucs_array_is_empty(net_devices)) {
+    if (ucs_array_is_empty(sys_devices)) {
         return UCS_OK;
     }
 
-    ucs_assert(ucs_array_begin(net_devices) != NULL);
+    ucs_assert((device_class == UCS_TOPO_DEVICE_CLASS_ACC) ||
+               (device_class == UCS_TOPO_DEVICE_CLASS_NET));
+    ucs_assert(ucs_array_begin(sys_devices) != NULL);
 
-    ucs_array_for_each(sys_dev, net_devices) {
-        dev_bus_id = &devices[*sys_dev].bus_id;
+    ucs_array_for_each(sys_dev, sys_devices) {
+        bus_id = &devices[*sys_dev].bus_id;
 
-        /* Start a new NIC if the bus ids differ (excluding the function). */
-        if ((nic_bus_id == NULL) ||
-            !ucs_topo_groups_bus_id_same_slot(nic_bus_id, dev_bus_id)) {
-            nic = ucs_array_append(nics, return UCS_ERR_NO_MEMORY);
-            memset(nic, 0, sizeof(*nic));
-            nic_bus_id = dev_bus_id;
+        if ((prev_bus_id == NULL) ||
+            !ucs_topo_groups_bus_id_match(device_class, prev_bus_id, bus_id)) {
+            /* No match, add a new element. */
+            element = ucs_array_append(elements, return UCS_ERR_NO_MEMORY);
+            memset(element, 0, sizeof(*element));
+            prev_bus_id = bus_id;
         }
 
-        if (nic->num_ports >= UCS_TOPO_MAX_PORTS_PER_NIC) {
-            ucs_error(
-                    "too many network devices (%zu) in pci slot %04x:%02x:%02x",
-                    nic->num_ports, (unsigned)dev_bus_id->domain,
-                    (unsigned)dev_bus_id->bus, (unsigned)dev_bus_id->slot);
+        if (element->num_devices >= UCS_TOPO_MAX_DEVICES_PER_ELEMENT) {
+            ucs_error("too many devices (%zu) with bus id " UCS_SYS_BUS_ID_FMT,
+                      element->num_devices, UCS_SYS_BUS_ID_ARG(bus_id));
             return UCS_ERR_EXCEEDS_LIMIT;
         }
 
-        nic->ports[nic->num_ports++] = *sys_dev;
+        element->devices[element->num_devices++] = *sys_dev;
     }
 
     return UCS_OK;
@@ -394,12 +369,16 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
         ucs_topo_groups_cx9_filter(devices, &net_devices);
     }
 
-    status = ucs_topo_groups_gpus_build(devices, &acc_devices, &inventory.gpus);
+    status = ucs_topo_groups_devices_build(devices, &acc_devices,
+                                           UCS_TOPO_DEVICE_CLASS_ACC,
+                                           &inventory.gpus);
     if (status != UCS_OK) {
         goto err_free_arrays;
     }
 
-    status = ucs_topo_groups_nics_build(devices, &net_devices, &inventory.nics);
+    status = ucs_topo_groups_devices_build(devices, &net_devices,
+                                           UCS_TOPO_DEVICE_CLASS_NET,
+                                           &inventory.nics);
     if (status != UCS_OK) {
         goto err_free_arrays;
     }

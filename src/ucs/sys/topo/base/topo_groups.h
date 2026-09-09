@@ -12,8 +12,7 @@
 
 BEGIN_C_DECLS
 
-#define UCS_TOPO_MAX_PORTS_PER_NIC   2
-#define UCS_TOPO_MAX_DEVICES_PER_GPU 8
+#define UCS_TOPO_MAX_DEVICES_PER_ELEMENT 8
 
 
 /**
@@ -28,26 +27,16 @@ typedef enum {
 
 /**
  * @ingroup UCS_RESOURCE
- * Physical GPU represented in a topology group.
+ * Physical device represented in a topology group.
  */
 typedef struct {
-    ucs_sys_device_t devices[UCS_TOPO_MAX_DEVICES_PER_GPU];
+    ucs_sys_device_t devices[UCS_TOPO_MAX_DEVICES_PER_ELEMENT];
     size_t           num_devices;
-} ucs_topo_gpu_t;
+} ucs_topo_group_element_t;
 
 
-/**
- * @ingroup UCS_RESOURCE
- * Physical NIC represented in a topology group.
- */
-typedef struct {
-    ucs_sys_device_t ports[UCS_TOPO_MAX_PORTS_PER_NIC];
-    size_t           num_ports;
-} ucs_topo_nic_t;
-
-
-UCS_ARRAY_DECLARE_TYPE(ucs_topo_gpu_array_t, size_t, ucs_topo_gpu_t);
-UCS_ARRAY_DECLARE_TYPE(ucs_topo_nic_array_t, size_t, ucs_topo_nic_t);
+UCS_ARRAY_DECLARE_TYPE(ucs_topo_group_element_array_t, size_t,
+                       ucs_topo_group_element_t);
 
 
 /**
@@ -55,8 +44,8 @@ UCS_ARRAY_DECLARE_TYPE(ucs_topo_nic_array_t, size_t, ucs_topo_nic_t);
  * Group of GPUs and NICs sharing a topology locality.
  */
 typedef struct {
-    ucs_topo_gpu_array_t gpus;
-    ucs_topo_nic_array_t nics;
+    ucs_topo_group_element_array_t gpus;
+    ucs_topo_group_element_array_t nics;
 } ucs_topo_group_t;
 
 UCS_ARRAY_DECLARE_TYPE(ucs_topo_group_array_t, size_t, ucs_topo_group_t);
