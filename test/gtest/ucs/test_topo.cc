@@ -16,7 +16,6 @@ extern "C" {
 #include <ucs/memory/numa.h>
 #include <ucs/sys/sys.h>
 #include <ucs/sys/topo/base/topo.h>
-#include <ucs/sys/topo/base/topo_groups.h>
 }
 
 static std::string get_sysfs_device_path(const std::string &bdf)
