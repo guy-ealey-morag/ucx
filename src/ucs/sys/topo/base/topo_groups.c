@@ -348,8 +348,7 @@ void ucs_topo_init_group(ucs_topo_group_t *group)
 
 static void ucs_topo_init_groups(ucs_topo_groups_t *groups)
 {
-    groups->type = UCS_TOPO_GROUPS_TYPE_UNKNOWN;
-    ucs_array_init_dynamic(&groups->groups);
+    ucs_array_init_dynamic(groups);
 }
 
 static ucs_status_t
@@ -415,36 +414,19 @@ err_free_arrays:
 
 static ucs_status_t
 ucs_topo_groups_build_groups(const ucs_topo_group_t *inventory,
-                             ucs_topo_groups_type_t groups_type,
                              ucs_topo_groups_t *groups)
 {
     (void)inventory;
     (void)groups;
-
-    groups->type = groups_type;
 
     /* TODO: Build groups from inventory. */
 
     return UCS_OK;
 }
 
-static const char *ucs_topo_groups_type_str(ucs_topo_groups_type_t type)
-{
-    switch (type) {
-    case UCS_TOPO_GROUPS_TYPE_UNKNOWN:
-        return "unknown";
-    case UCS_TOPO_GROUPS_TYPE_VERA_RUBIN:
-        return "vera-rubin";
-    default:
-        return "<invalid>";
-    }
-}
-
 ucs_status_t
 ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
-                            unsigned num_devices,
-                            ucs_topo_groups_type_t groups_type,
-                            ucs_topo_groups_t *groups_p)
+                            unsigned num_devices, ucs_topo_groups_t *groups_p)
 {
     ucs_topo_group_t inventory;
     ucs_topo_groups_t groups;
@@ -452,28 +434,21 @@ ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
 
     ucs_topo_init_groups(&groups);
 
-    if (groups_type != UCS_TOPO_GROUPS_TYPE_VERA_RUBIN) {
-        /* Currently only Vera Rubin is supported. */
-        goto out;
-    }
-
     status = ucs_topo_groups_inventory_build(devices, num_devices, 1,
                                              &inventory);
     if (status != UCS_OK) {
         return status;
     }
 
-    status = ucs_topo_groups_build_groups(&inventory, groups_type, &groups);
+    status = ucs_topo_groups_build_groups(&inventory, &groups);
     if (status != UCS_OK) {
         goto err_cleanup_inventory;
     }
 
     ucs_topo_release_group(&inventory);
 
-out:
-    ucs_debug("initialized topo groups of type %s with %zu groups",
-              ucs_topo_groups_type_str(groups.type),
-              ucs_array_length(&groups.groups));
+    ucs_debug("initialized topo groups with %zu groups",
+              ucs_array_length(&groups));
 
     *groups_p = groups;
     return UCS_OK;

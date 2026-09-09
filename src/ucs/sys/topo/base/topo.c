@@ -1403,21 +1403,18 @@ static void ucs_topo_release_devices()
     }
 }
 
-static ucs_topo_groups_type_t ucs_topo_groups_type_detect()
-{
-    return (ucs_arch_get_cpu_model() == UCS_CPU_MODEL_NVIDIA_VERA) ?
-                   UCS_TOPO_GROUPS_TYPE_VERA_RUBIN :
-                   UCS_TOPO_GROUPS_TYPE_UNKNOWN;
-}
-
 ucs_status_t ucs_topo_build_groups(ucs_topo_groups_t *groups_p)
 {
     ucs_status_t status;
 
+    if (ucs_arch_get_cpu_model() != UCS_CPU_MODEL_NVIDIA_VERA) {
+        /* Currently only Vera Rubin architecture supports topology groups. */
+        return UCS_ERR_UNSUPPORTED;
+    }
+
     ucs_spin_lock(&ucs_topo_global_ctx.lock);
     status = ucs_topo_build_groups_inner(ucs_topo_global_ctx.devices,
                                          ucs_topo_global_ctx.num_devices,
-                                         ucs_topo_groups_type_detect(),
                                          groups_p);
     ucs_spin_unlock(&ucs_topo_global_ctx.lock);
 
@@ -1437,11 +1434,11 @@ void ucs_topo_release_groups(ucs_topo_groups_t *groups)
 
     ucs_assert(groups != NULL);
 
-    for (i = 0; i < ucs_array_length(&groups->groups); ++i) {
-        ucs_topo_release_group(&ucs_array_elem(&groups->groups, i));
+    for (i = 0; i < ucs_array_length(groups); ++i) {
+        ucs_topo_release_group(&ucs_array_elem(groups, i));
     }
 
-    ucs_array_cleanup_dynamic(&groups->groups);
+    ucs_array_cleanup_dynamic(groups);
 }
 
 ucs_global_state_t *ucs_topo_extract_state(void)
