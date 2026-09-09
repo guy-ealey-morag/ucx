@@ -75,8 +75,8 @@ ucs_topo_groups_sys_dev_compact(ucs_topo_groups_sys_dev_array_t *sys_devs)
 /* This filter is required because currently CUDA gpus may have duplicates in
  * the devices array due to duplicate insertion by NVML and the CUDA driver. */
 static void
-ucs_topo_groups_gpu_aliases_filter(ucs_topo_groups_sys_dev_array_t *gpus,
-                                   const ucs_topo_sys_device_info_t *devices)
+ucs_topo_groups_gpu_aliases_filter(const ucs_topo_sys_device_info_t *devices,
+                                   ucs_topo_groups_sys_dev_array_t *gpus)
 {
     ucs_bus_id_bit_rep_t bus_id1, bus_id2;
     ucs_sys_device_t sys_dev1, sys_dev2;
@@ -363,7 +363,7 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
     ucs_topo_groups_sys_dev_sort(&net_devices);
 
     /* TODO: Remove this filter when NVML duplicates issue is fixed. */
-    ucs_topo_groups_gpu_aliases_filter(&acc_devices, devices);
+    ucs_topo_groups_gpu_aliases_filter(devices, &acc_devices);
 
     if (is_vera_rubin) {
         ucs_topo_groups_cx9_filter(devices, &net_devices);
@@ -469,5 +469,6 @@ out:
 
 err_cleanup_inventory:
     ucs_topo_release_group(&inventory);
+    ucs_topo_release_groups(&groups);
     return status;
 }
