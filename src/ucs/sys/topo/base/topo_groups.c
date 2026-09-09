@@ -56,22 +56,6 @@ ucs_topo_groups_sys_dev_sort(ucs_topo_groups_sys_dev_array_t *sys_devs)
                 NULL);
 }
 
-/* Compact the array by removing unknown devices. */
-static void
-ucs_topo_groups_sys_dev_compact(ucs_topo_groups_sys_dev_array_t *sys_devs)
-{
-    size_t dst = 0;
-    size_t src;
-
-    for (src = 0; src < ucs_array_length(sys_devs); ++src) {
-        if (ucs_array_elem(sys_devs, src) != UCS_SYS_DEVICE_ID_UNKNOWN) {
-            ucs_array_elem(sys_devs, dst++) = ucs_array_elem(sys_devs, src);
-        }
-    }
-
-    ucs_array_set_length(sys_devs, dst);
-}
-
 /* This filter is required because currently CUDA gpus may have duplicates in
  * the devices array due to duplicate insertion by NVML and the CUDA driver. */
 static void
@@ -80,7 +64,7 @@ ucs_topo_groups_gpu_aliases_filter(const ucs_topo_sys_device_info_t *devices,
 {
     ucs_bus_id_bit_rep_t bus_id1, bus_id2;
     ucs_sys_device_t sys_dev1, sys_dev2;
-    size_t i;
+    size_t src, dst, i;
 
     if (ucs_array_length(gpus) < 2) {
         return;
@@ -96,6 +80,7 @@ ucs_topo_groups_gpu_aliases_filter(const ucs_topo_sys_device_info_t *devices,
 
         if ((bus_id1 == bus_id2) &&
             (devices[sys_dev2].user_value == UCS_SYS_DEVICE_USER_VALUE_EMPTY)) {
+            /* Mark the device as unknown to be removed later. */
             ucs_array_elem(gpus, i + 1) = UCS_SYS_DEVICE_ID_UNKNOWN;
 
             /* Promised by sorting. */
@@ -108,7 +93,17 @@ ucs_topo_groups_gpu_aliases_filter(const ucs_topo_sys_device_info_t *devices,
         }
     }
 
-    ucs_topo_groups_sys_dev_compact(gpus);
+    /* Compact the array by removing unknown devices. */
+    dst = 0;
+    for (src = 0; src < ucs_array_length(gpus); ++src) {
+        if (ucs_array_elem(gpus, src) == UCS_SYS_DEVICE_ID_UNKNOWN) {
+            continue;
+        }
+
+        ucs_array_elem(gpus, dst++) = ucs_array_elem(gpus, src);
+    }
+
+    ucs_array_set_length(gpus, dst);
 }
 
 static ucs_status_t
@@ -166,15 +161,54 @@ out_free_sysfs_path:
     return status;
 }
 
-static void
-ucs_topo_groups_cx9_filter(const ucs_topo_sys_device_info_t *devices,
-                           ucs_topo_groups_sys_dev_array_t *nics)
+static int ucs_topo_groups_is_nic_cx9(const ucs_topo_sys_device_info_t *device)
 {
+    const ucs_sys_pci_id_t *pci_id = &device->pci_id;
+    const ucs_sys_bus_id_t *bus_id = &device->bus_id;
     char fw_ver[UCS_TOPO_GROUPS_FW_VER_MAX];
-    const ucs_topo_sys_device_info_t *device;
-    ucs_sys_pci_id_t const *pci_id;
-    ucs_sys_device_t *sys_dev;
     ucs_status_t status;
+
+    if (pci_id->vendor != UCS_TOPO_GROUPS_MELLANOX_VENDOR_ID) {
+        return 0;
+    }
+
+    if (pci_id->device == UCS_TOPO_GROUPS_CX9_DEVICE_ID) {
+        ucs_debug("cx9 device found (device id)");
+        return 1;
+    }
+
+    if (pci_id->device != UCS_TOPO_GROUPS_MLX5_VF_DEVICE_ID) {
+        return 0;
+    }
+
+    ucs_debug("mlx5 VF device found");
+
+    /* PCI device ID is not indicative when the device is a VF, instead use
+     * the fact that fw version is 82.XX.XXXX for CX9 */
+    status = ucs_topo_groups_read_ib_fw_ver(bus_id, fw_ver, sizeof(fw_ver));
+    if (status != UCS_OK) {
+        ucs_debug("could not read firmware version (error: %s)",
+                  ucs_status_string(status));
+        return 0;
+    }
+
+    if (strncmp(fw_ver, "82.", 3) != 0) {
+        ucs_debug("firmware version mismatch: %s", fw_ver);
+        return 0;
+    }
+
+    ucs_debug("cx9 device found (firmware version)");
+    return 1;
+}
+
+static void
+ucs_topo_groups_nics_cx9_filter(const ucs_topo_sys_device_info_t *devices,
+                                ucs_topo_groups_sys_dev_array_t *nics)
+{
+    size_t dst = 0;
+    const ucs_topo_sys_device_info_t *device;
+    ucs_sys_device_t sys_dev;
+    size_t src;
 
     if (ucs_array_is_empty(nics)) {
         return;
@@ -184,52 +218,29 @@ ucs_topo_groups_cx9_filter(const ucs_topo_sys_device_info_t *devices,
 
     ucs_log_indent(1);
 
-    ucs_array_for_each(sys_dev, nics) {
-        device = &devices[*sys_dev];
-        pci_id = &device->pci_id;
+    for (src = 0; src < ucs_array_length(nics); ++src) {
+        sys_dev = ucs_array_elem(nics, src);
+        device  = &devices[sys_dev];
 
         ucs_log_indent(-1);
 
-        ucs_debug("cx9_filter: processing network device " UCS_SYS_BUS_ID_FMT,
-                  UCS_SYS_BUS_ID_ARG(&device->bus_id));
+        ucs_debug("cx9_filter: processing network device " UCS_SYS_BUS_ID_FMT
+                  " (pci id " UCS_SYS_PCI_ID_FMT ")",
+                  UCS_SYS_BUS_ID_ARG(&device->bus_id),
+                  UCS_SYS_PCI_ID_ARG(&device->pci_id));
 
         ucs_log_indent(1);
 
-        if (pci_id->vendor == UCS_TOPO_GROUPS_MELLANOX_VENDOR_ID) {
-            if (pci_id->device == UCS_TOPO_GROUPS_CX9_DEVICE_ID) {
-                ucs_debug("cx9 device found (device id)");
-                continue;
-            } else if (pci_id->device == UCS_TOPO_GROUPS_MLX5_VF_DEVICE_ID) {
-                ucs_debug("mlx5 VF device found");
-
-                /* PCI device ID is not indicative when the device is a VF,
-                 * instead use the fact that fw version is 82.XX.XXXX for CX9 */
-                status = ucs_topo_groups_read_ib_fw_ver(&device->bus_id, fw_ver,
-                                                        sizeof(fw_ver));
-                if (status == UCS_OK) {
-                    if (strncmp(fw_ver, "82.", 3) == 0) {
-                        ucs_debug("cx9 device found (firmware version)");
-                        continue;
-                    } else {
-                        ucs_debug("firmware version mismatch: %s", fw_ver);
-                    }
-                } else {
-                    ucs_debug("could not read firmware version (error: %s)",
-                              ucs_status_string(status));
-                }
-            }
+        if (ucs_topo_groups_is_nic_cx9(device)) {
+            ucs_array_elem(nics, dst++) = sys_dev;
+        } else {
+            ucs_debug("Network device is not CX9, skipping");
         }
-
-        ucs_debug("ignoring network device " UCS_SYS_BUS_ID_FMT
-                  " (pci id " UCS_SYS_PCI_ID_FMT ")",
-                  UCS_SYS_BUS_ID_ARG(&device->bus_id),
-                  UCS_SYS_PCI_ID_ARG(pci_id));
-        *sys_dev = UCS_SYS_DEVICE_ID_UNKNOWN;
     }
 
     ucs_log_indent(-1);
 
-    ucs_topo_groups_sys_dev_compact(nics);
+    ucs_array_set_length(nics, dst);
 }
 
 static ucs_status_t
@@ -293,8 +304,7 @@ ucs_topo_groups_devices_build(const ucs_topo_sys_device_info_t *devices,
                               const ucs_topo_device_class_t device_class,
                               ucs_topo_group_element_array_t *elements)
 {
-    const ucs_sys_bus_id_t *prev_bus_id = NULL;
-    const ucs_sys_bus_id_t *bus_id;
+    const ucs_sys_bus_id_t *bus_id, *prev_bus_id;
     const ucs_sys_device_t *sys_dev;
     ucs_topo_group_element_t *element;
 
@@ -306,6 +316,7 @@ ucs_topo_groups_devices_build(const ucs_topo_sys_device_info_t *devices,
                (device_class == UCS_TOPO_DEVICE_CLASS_NET));
     ucs_assert(ucs_array_begin(sys_devices) != NULL);
 
+    prev_bus_id = NULL;
     ucs_array_for_each(sys_dev, sys_devices) {
         bus_id = &devices[*sys_dev].bus_id;
 
@@ -366,7 +377,7 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
     ucs_topo_groups_gpu_aliases_filter(devices, &acc_devices);
 
     if (is_vera_rubin) {
-        ucs_topo_groups_cx9_filter(devices, &net_devices);
+        ucs_topo_groups_nics_cx9_filter(devices, &net_devices);
     }
 
     status = ucs_topo_groups_devices_build(devices, &acc_devices,
