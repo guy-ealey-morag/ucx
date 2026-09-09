@@ -229,13 +229,9 @@ ucs_topo_groups_nics_cx9_filter(const ucs_topo_sys_device_info_t *devices,
 
     ucs_assert(ucs_array_begin(nics) != NULL);
 
-    ucs_log_indent(1);
-
     for (src = 0; src < ucs_array_length(nics); ++src) {
         sys_dev = ucs_array_elem(nics, src);
         device  = &devices[sys_dev];
-
-        ucs_log_indent(-1);
 
         ucs_debug("cx9_filter: processing network device " UCS_SYS_BUS_ID_FMT
                   " (pci id " UCS_SYS_PCI_ID_FMT ")",
@@ -249,9 +245,9 @@ ucs_topo_groups_nics_cx9_filter(const ucs_topo_sys_device_info_t *devices,
         } else {
             ucs_debug("Network device is not CX9, skipping");
         }
-    }
 
-    ucs_log_indent(-1);
+        ucs_log_indent(-1);
+    }
 
     ucs_array_set_length(nics, dst);
 }
