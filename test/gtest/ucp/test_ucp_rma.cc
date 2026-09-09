@@ -329,6 +329,14 @@ protected:
 
 };
 
+class test_ucp_rma_iov_cuda : public test_ucp_rma {
+public:
+    static void get_test_variants(std::vector<ucp_test_variant> &variants)
+    {
+        add_variant(variants, UCP_FEATURE_RMA);
+    }
+};
+
 UCS_TEST_P(test_ucp_rma, put_blocking) {
     test_mem_types(static_cast<send_func_t>(&test_ucp_rma::put_b));
 }
@@ -368,7 +376,7 @@ UCS_TEST_SKIP_COND_P(test_ucp_rma, get_nonblocking_iov_zcopy,
                    64 * UCS_KBYTE);
 }
 
-UCS_TEST_SKIP_COND_P(test_ucp_rma, put_iov_zcopy_multi_buffer_cuda,
+UCS_TEST_SKIP_COND_P(test_ucp_rma_iov_cuda, put_iov_zcopy_multi_buffer_cuda,
                      !mem_buffer::is_mem_type_supported(UCS_MEMORY_TYPE_CUDA),
                      "ZCOPY_THRESH=0")
 {
@@ -379,7 +387,7 @@ UCS_TEST_SKIP_COND_P(test_ucp_rma, put_iov_zcopy_multi_buffer_cuda,
     test_iov_multi_buffer(UCP_OP_ID_PUT);
 }
 
-UCS_TEST_SKIP_COND_P(test_ucp_rma, get_iov_zcopy_multi_buffer_cuda,
+UCS_TEST_SKIP_COND_P(test_ucp_rma_iov_cuda, get_iov_zcopy_multi_buffer_cuda,
                      !mem_buffer::is_mem_type_supported(UCS_MEMORY_TYPE_CUDA),
                      "ZCOPY_THRESH=0")
 {
@@ -390,7 +398,7 @@ UCS_TEST_SKIP_COND_P(test_ucp_rma, get_iov_zcopy_multi_buffer_cuda,
     test_iov_multi_buffer(UCP_OP_ID_GET);
 }
 
-UCS_TEST_SKIP_COND_P(test_ucp_rma, put_iov_heterogeneous_mem_types,
+UCS_TEST_SKIP_COND_P(test_ucp_rma_iov_cuda, put_iov_heterogeneous_mem_types,
                      !ENABLE_PARAMS_CHECK || !mem_buffer::is_mem_type_supported(
                                                      UCS_MEMORY_TYPE_CUDA),
                      "ZCOPY_THRESH=0")
@@ -414,6 +422,8 @@ UCS_TEST_SKIP_COND_P(test_ucp_rma, put_iov_heterogeneous_mem_types,
                                               rkey, &param);
     EXPECT_EQ(UCS_ERR_INVALID_PARAM, UCS_PTR_STATUS(status_ptr));
 }
+
+UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_rma_iov_cuda, all, "all")
 
 UCS_TEST_P(test_ucp_rma, get_blocking_zcopy, "ZCOPY_THRESH=0") {
     /* test get_zcopy minimal message length is respected */
