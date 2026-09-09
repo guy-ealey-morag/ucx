@@ -182,8 +182,8 @@ out_free_sysfs_path:
 }
 
 static void
-ucs_topo_groups_cx9_filter(const ucs_topo_sys_device_info_t *devices,
-                           ucs_topo_groups_sys_dev_array_t *nics)
+ucs_topo_groups_nics_cx9_filter(const ucs_topo_sys_device_info_t *devices,
+                                ucs_topo_groups_sys_dev_array_t *nics)
 {
     char fw_ver[UCS_TOPO_GROUPS_FW_VER_MAX];
     ucs_topo_sys_device_info_t const *device;
@@ -389,7 +389,7 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
     ucs_topo_groups_gpu_aliases_filter(&acc_devices, devices);
 
     if (type == UCS_TOPO_GROUPS_TYPE_CLIQUE) {
-        ucs_topo_groups_cx9_filter(devices, &net_devices);
+        ucs_topo_groups_nics_cx9_filter(devices, &net_devices);
     }
 
     status = ucs_topo_groups_gpus_build(devices, &acc_devices, &inventory.gpus);

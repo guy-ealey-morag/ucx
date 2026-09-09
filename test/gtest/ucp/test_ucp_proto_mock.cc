@@ -1466,7 +1466,7 @@ protected:
         if (op_id == UCP_OP_ID_RNDV_RECV) {
             const auto *rpriv =
                     static_cast<const ucp_proto_rndv_bulk_priv_t*>(
-                            threshold->proto_config.priv);
+                    threshold->proto_config.priv);
             EXPECT_EQ(UCS_MEMORY_TYPE_HOST, rpriv->frag_mem_type);
             EXPECT_TRUE(ucs_topo_is_reachable(m_transfer_sys_dev,
                                               rpriv->frag_sys_dev));
@@ -2416,6 +2416,7 @@ protected:
 
     void reset_perf_query_counts()
     {
+        ASSERT_NE(UCP_WORKER_CFG_INDEX_NULL, rkey_config_index());
         m_perf_query_counts.clear();
     }
 
@@ -2433,16 +2434,45 @@ protected:
 
     const ucp_gpu_nic_sys_dev_bitmap_t *
     resolve_assignment(ucs_memory_type_t mem_type, ucp_dt_class_t dt_class,
-                       ucs_sys_device_t sys_dev, uint8_t sg_count)
+                       ucs_sys_device_t sys_dev, uint8_t sg_count,
+                       uct_ep_operation_t memtype_op,
+                       ucs_memory_type_t reg_mem_type,
+                       ucs_sys_device_t reg_mem_sys_dev)
     {
-        ucp_proto_select_key_t select_key   = make_select_key(UCP_OP_ID_PUT,
-                                                              mem_type, dt_class,
-                                                              sys_dev, sg_count);
-        ucp_proto_init_params_t init_params = {};
+        const ucp_proto_select_key_t select_key       = make_select_key(
+                UCP_OP_ID_PUT, mem_type, dt_class, sys_dev, sg_count);
+        ucp_proto_multi_init_params_t params          = {};
+        ucp_proto_common_init_params_t *common_params = &params.super;
+        ucp_proto_init_params_t *init_params          = &common_params->super;
 
-        init_params.worker       = sender().worker();
-        init_params.select_param = &select_key.param;
-        return ucp_proto_multi_get_assigned_nic_bitmap(&init_params);
+        init_params->worker                 = sender().worker();
+        init_params->select_param           = &select_key.param;
+        common_params->memtype_op           = memtype_op;
+        common_params->reg_mem_info.type    = reg_mem_type;
+        common_params->reg_mem_info.sys_dev = reg_mem_sys_dev;
+
+        return ucp_proto_multi_get_assigned_nic_bitmap(&params);
+    }
+
+    const ucp_gpu_nic_sys_dev_bitmap_t *
+    resolve_direct_assignment(ucs_memory_type_t mem_type,
+                              ucp_dt_class_t dt_class, ucs_sys_device_t sys_dev,
+                              uint8_t sg_count)
+    {
+        return resolve_assignment(mem_type, dt_class, sys_dev, sg_count,
+                                  UCT_EP_OP_LAST, UCS_MEMORY_TYPE_UNKNOWN,
+                                  UCS_SYS_DEVICE_ID_UNKNOWN);
+    }
+
+    const ucp_gpu_nic_sys_dev_bitmap_t *
+    resolve_staged_assignment(ucs_memory_type_t mem_type,
+                              ucp_dt_class_t dt_class, ucs_sys_device_t sys_dev,
+                              uint8_t sg_count, ucs_memory_type_t reg_mem_type,
+                              ucs_sys_device_t reg_mem_sys_dev)
+    {
+        return resolve_assignment(mem_type, dt_class, sys_dev, sg_count,
+                                  UCT_EP_OP_PUT_ZCOPY, reg_mem_type,
+                                  reg_mem_sys_dev);
     }
 
     void expect_direct_candidates(ucs_sys_device_t gpu_sys_dev,
@@ -2621,7 +2651,7 @@ private:
                     ucp_dt_class_t dt_class, ucs_sys_device_t sys_dev,
                     uint8_t sg_count)
     {
-        ucp_memory_info_t mem_info        = {
+        const ucp_memory_info_t mem_info  = {
             .type    = static_cast<uint8_t>(mem_type),
             .sys_dev = sys_dev,
             .flags   = UCS_MEM_FLAG_REGISTRABLE
@@ -2638,7 +2668,7 @@ private:
     {
         const ucp_worker_cfg_index_t rkey_cfg_index = rkey_config_index();
         ucp_worker_h worker                         = sender().worker();
-        ucp_proto_select_key_t select_key =
+        const ucp_proto_select_key_t select_key =
                 make_select_key(op_id, UCS_MEMORY_TYPE_CUDA,
                                 UCP_DATATYPE_CONTIG, gpu_sys_dev, 1);
         ucp_proto_select_t *proto_select;
@@ -2788,7 +2818,8 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic,
     const resolver_case disabled_cases[] =
             {{"managed CUDA", UCS_MEMORY_TYPE_CUDA_MANAGED, UCP_DATATYPE_CONTIG,
               mapped_gpu(), 1},
-             {"IOV", UCS_MEMORY_TYPE_CUDA, UCP_DATATYPE_IOV, mapped_gpu(), 2},
+             {"host", UCS_MEMORY_TYPE_HOST, UCP_DATATYPE_CONTIG,
+              UCS_SYS_DEVICE_ID_UNKNOWN, 1},
              {"unknown device", UCS_MEMORY_TYPE_CUDA, UCP_DATATYPE_CONTIG,
               UCS_SYS_DEVICE_ID_UNKNOWN, 1},
              {"unmapped GPU", UCS_MEMORY_TYPE_CUDA, UCP_DATATYPE_CONTIG,
@@ -2800,20 +2831,70 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic,
     expected_bitmap = ucp_gpu_nic_assignment_lookup(assignment(), mapped_gpu());
     ASSERT_NE(nullptr, expected_bitmap);
     EXPECT_EQ(expected_bitmap,
+              resolve_direct_assignment(UCS_MEMORY_TYPE_CUDA,
+                                        UCP_DATATYPE_CONTIG, mapped_gpu(), 1));
+    EXPECT_EQ(expected_bitmap,
+              resolve_direct_assignment(UCS_MEMORY_TYPE_CUDA, UCP_DATATYPE_IOV,
+                                        mapped_gpu(), 2))
+            << "datatype eligibility belongs to the protocol";
+    EXPECT_EQ(nullptr,
               resolve_assignment(UCS_MEMORY_TYPE_CUDA, UCP_DATATYPE_CONTIG,
-                                 mapped_gpu(), 1));
+                                 unmapped_gpu(), 1, UCT_EP_OP_LAST,
+                                 UCS_MEMORY_TYPE_CUDA, mapped_gpu()))
+            << "direct protocol ignores registration identity";
+    EXPECT_EQ(expected_bitmap,
+              resolve_staged_assignment(UCS_MEMORY_TYPE_CUDA,
+                                        UCP_DATATYPE_CONTIG, unmapped_gpu(), 1,
+                                        UCS_MEMORY_TYPE_CUDA, mapped_gpu()))
+            << "known CUDA staging owner";
+    EXPECT_EQ(nullptr,
+              resolve_staged_assignment(UCS_MEMORY_TYPE_CUDA,
+                                        UCP_DATATYPE_CONTIG, mapped_gpu(), 1,
+                                        UCS_MEMORY_TYPE_CUDA, unmapped_gpu()))
+            << "known CUDA staging owner does not fall back";
+    EXPECT_EQ(expected_bitmap,
+              resolve_staged_assignment(UCS_MEMORY_TYPE_CUDA,
+                                        UCP_DATATYPE_CONTIG,
+                                        UCS_SYS_DEVICE_ID_UNKNOWN, 1,
+                                        UCS_MEMORY_TYPE_CUDA, mapped_gpu()))
+            << "known local staging owner with unknown application device";
+    EXPECT_EQ(expected_bitmap,
+              resolve_staged_assignment(UCS_MEMORY_TYPE_HOST,
+                                        UCP_DATATYPE_CONTIG,
+                                        UCS_SYS_DEVICE_ID_UNKNOWN, 1,
+                                        UCS_MEMORY_TYPE_CUDA, mapped_gpu()))
+            << "known CUDA staging owner with host application memory";
+    EXPECT_EQ(expected_bitmap,
+              resolve_staged_assignment(UCS_MEMORY_TYPE_CUDA,
+                                        UCP_DATATYPE_CONTIG, mapped_gpu(), 1,
+                                        UCS_MEMORY_TYPE_HOST,
+                                        UCS_SYS_DEVICE_ID_UNKNOWN))
+            << "host staging falls back to the application owner";
+    EXPECT_EQ(expected_bitmap,
+              resolve_staged_assignment(UCS_MEMORY_TYPE_CUDA,
+                                        UCP_DATATYPE_CONTIG, mapped_gpu(), 1,
+                                        UCS_MEMORY_TYPE_ROCM, unmapped_gpu()))
+            << "known non-CUDA staging falls back to the application owner";
+    EXPECT_EQ(expected_bitmap,
+              resolve_staged_assignment(UCS_MEMORY_TYPE_CUDA,
+                                        UCP_DATATYPE_CONTIG, mapped_gpu(), 1,
+                                        UCS_MEMORY_TYPE_CUDA,
+                                        UCS_SYS_DEVICE_ID_UNKNOWN))
+            << "unknown staging device falls back to the application owner";
 
     for (const auto &test_case : disabled_cases) {
-        EXPECT_EQ(nullptr,
-                  resolve_assignment(test_case.mem_type, test_case.dt_class,
-                                     test_case.sys_dev, test_case.sg_count))
+        EXPECT_EQ(nullptr, resolve_direct_assignment(test_case.mem_type,
+                                                     test_case.dt_class,
+                                                     test_case.sys_dev,
+                                                     test_case.sg_count))
                 << test_case.name;
     }
 
     context                     = sender().worker()->context;
     context->gpu_nic_assignment = nullptr;
-    EXPECT_EQ(nullptr, resolve_assignment(UCS_MEMORY_TYPE_CUDA,
-                                          UCP_DATATYPE_CONTIG, mapped_gpu(), 1))
+    EXPECT_EQ(nullptr,
+              resolve_direct_assignment(UCS_MEMORY_TYPE_CUDA,
+                                        UCP_DATATYPE_CONTIG, mapped_gpu(), 1))
             << "NULL context assignment";
     context->gpu_nic_assignment = assignment();
 

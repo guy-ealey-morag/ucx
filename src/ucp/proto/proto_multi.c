@@ -22,28 +22,35 @@
 #include <ucs/sys/topo/base/topo.h>
 
 
-/*
- * Resolve the NIC assignment for a direct contiguous CUDA protocol.
- * Return NULL when assignment is disabled or the selection is not eligible.
- */
 const ucp_gpu_nic_sys_dev_bitmap_t *ucp_proto_multi_get_assigned_nic_bitmap(
-        const ucp_proto_init_params_t *init_params)
+        const ucp_proto_multi_init_params_t *params)
 {
+    const ucp_proto_common_init_params_t *common_params = &params->super;
+    const ucp_proto_init_params_t *init_params   = &common_params->super;
     const ucp_proto_select_param_t *select_param = init_params->select_param;
     ucp_context_h context = init_params->worker->context;
+    ucs_sys_device_t assignment_gpu_sys_dev;
 
-    /* Only an application CUDA buffer with a stable device identity can use
-     * the context assignment. */
-    if ((select_param->mem_type != UCS_MEMORY_TYPE_CUDA) ||
-        (select_param->dt_class != UCP_DATATYPE_CONTIG) ||
-        (select_param->sys_dev == UCS_SYS_DEVICE_ID_UNKNOWN) ||
-        (context->gpu_nic_assignment == NULL)) {
+    if (context->gpu_nic_assignment == NULL) {
+        /* No assignment configured. */
         return NULL;
     }
 
-    /* The selection sys_dev identifies the application GPU. */
+    /* Use the staging buffer device if applicable, otherwise use the
+     * application buffer device if applicable. */
+    if ((common_params->memtype_op != UCT_EP_OP_LAST) &&
+        (common_params->reg_mem_info.type == UCS_MEMORY_TYPE_CUDA) &&
+        (common_params->reg_mem_info.sys_dev != UCS_SYS_DEVICE_ID_UNKNOWN)) {
+        assignment_gpu_sys_dev = common_params->reg_mem_info.sys_dev;
+    } else if ((select_param->mem_type == UCS_MEMORY_TYPE_CUDA) &&
+               (select_param->sys_dev != UCS_SYS_DEVICE_ID_UNKNOWN)) {
+        assignment_gpu_sys_dev = select_param->sys_dev;
+    } else {
+        return NULL;
+    }
+
     return ucp_gpu_nic_assignment_lookup(context->gpu_nic_assignment,
-                                         select_param->sys_dev);
+                                         assignment_gpu_sys_dev);
 }
 
 static UCS_F_ALWAYS_INLINE double
@@ -486,15 +493,11 @@ ucp_proto_multi_find_lanes(const ucp_proto_multi_init_params_t *params,
     return UCS_OK;
 }
 
-/*
- * Apply the GPU's assigned-NIC allow-list to discovered RMA_BW candidates.
- */
+/* Apply the resolved assignment to discovered RMA_BW candidates. */
 static ucs_status_t ucp_proto_multi_filter_gpu_nic_lanes(
         const ucp_proto_multi_init_params_t *params, ucp_lane_index_t *lanes,
         ucp_lane_index_t *num_lanes_p)
 {
-    const ucp_proto_select_param_t *select_param =
-            params->super.super.select_param;
     ucp_lane_index_t num_filtered_lanes       = 0;
     ucp_lane_index_t num_rma_bw_lanes         = 0;
     ucp_lane_index_t num_allowed_rma_bw_lanes = 0;
@@ -522,13 +525,13 @@ static ucs_status_t ucp_proto_multi_filter_gpu_nic_lanes(
         /* Keep only lanes whose local transport function is assigned. */
         if (!ucp_gpu_nic_bitmap_test(params->assigned_nic_bitmap,
                                      lane_sys_dev)) {
-            ucs_trace("gpu sys_dev %d removes lane %d on network sys_dev %d",
-                      select_param->sys_dev, lane, lane_sys_dev);
+            ucs_trace("assignment removes lane %d on network sys_dev %d", lane,
+                      lane_sys_dev);
             continue;
         }
 
-        ucs_trace("gpu sys_dev %d keeps lane %d on network sys_dev %d",
-                  select_param->sys_dev, lane, lane_sys_dev);
+        ucs_trace("assignment keeps lane %d on network sys_dev %d", lane,
+                  lane_sys_dev);
         lanes[num_filtered_lanes++] = lane;
         ++num_allowed_rma_bw_lanes;
     }
@@ -539,9 +542,8 @@ static ucs_status_t ucp_proto_multi_filter_gpu_nic_lanes(
         return UCS_OK;
     }
 
-    ucs_trace("gpu sys_dev %d retained %u/%u allowed RMA_BW lanes",
-              select_param->sys_dev, num_allowed_rma_bw_lanes,
-              num_rma_bw_lanes);
+    ucs_trace("assignment retained %u/%u allowed RMA_BW lanes",
+              num_allowed_rma_bw_lanes, num_rma_bw_lanes);
     return (num_allowed_rma_bw_lanes == 0) ? UCS_ERR_NO_ELEM : UCS_OK;
 }
 
