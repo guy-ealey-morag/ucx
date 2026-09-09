@@ -45,8 +45,6 @@ static int ucs_topo_groups_sys_dev_cmp(const void *elem1, const void *elem2,
 static void
 ucs_topo_groups_sys_dev_sort(ucs_topo_groups_sys_dev_array_t *sys_devs)
 {
-    ucs_assert(sys_devs != NULL);
-
     if (ucs_array_is_empty(sys_devs)) {
         return;
     }
@@ -83,9 +81,6 @@ ucs_topo_groups_gpu_aliases_filter(ucs_topo_groups_sys_dev_array_t *gpus,
     ucs_bus_id_bit_rep_t bus_id1, bus_id2;
     ucs_sys_device_t sys_dev1, sys_dev2;
     size_t i;
-
-    ucs_assert(gpus != NULL);
-    ucs_assert(devices != NULL);
 
     if (ucs_array_length(gpus) < 2) {
         return;
@@ -176,13 +171,10 @@ ucs_topo_groups_cx9_filter(const ucs_topo_sys_device_info_t *devices,
                            ucs_topo_groups_sys_dev_array_t *nics)
 {
     char fw_ver[UCS_TOPO_GROUPS_FW_VER_MAX];
-    ucs_topo_sys_device_info_t const *device;
+    const ucs_topo_sys_device_info_t *device;
     ucs_sys_pci_id_t const *pci_id;
     ucs_sys_device_t *sys_dev;
     ucs_status_t status;
-
-    ucs_assert(devices != NULL);
-    ucs_assert(nics != NULL);
 
     if (ucs_array_is_empty(nics)) {
         return;
@@ -198,17 +190,17 @@ ucs_topo_groups_cx9_filter(const ucs_topo_sys_device_info_t *devices,
 
         ucs_log_indent(-1);
 
-        ucs_trace("cx9_filter: processing network device " UCS_SYS_BUS_ID_FMT,
+        ucs_debug("cx9_filter: processing network device " UCS_SYS_BUS_ID_FMT,
                   UCS_SYS_BUS_ID_ARG(&device->bus_id));
 
         ucs_log_indent(1);
 
         if (pci_id->vendor == UCS_TOPO_GROUPS_MELLANOX_VENDOR_ID) {
             if (pci_id->device == UCS_TOPO_GROUPS_CX9_DEVICE_ID) {
-                ucs_trace("cx9 device found (device id)");
+                ucs_debug("cx9 device found (device id)");
                 continue;
             } else if (pci_id->device == UCS_TOPO_GROUPS_MLX5_VF_DEVICE_ID) {
-                ucs_trace("mlx5 VF device found");
+                ucs_debug("mlx5 VF device found");
 
                 /* PCI device ID is not indicative when the device is a VF,
                  * instead use the fact that fw version is 82.XX.XXXX for CX9 */
@@ -216,19 +208,19 @@ ucs_topo_groups_cx9_filter(const ucs_topo_sys_device_info_t *devices,
                                                         sizeof(fw_ver));
                 if (status == UCS_OK) {
                     if (strncmp(fw_ver, "82.", 3) == 0) {
-                        ucs_trace("cx9 device found (firmware version)");
+                        ucs_debug("cx9 device found (firmware version)");
                         continue;
                     } else {
-                        ucs_trace("firmware version mismatch: %s", fw_ver);
+                        ucs_debug("firmware version mismatch: %s", fw_ver);
                     }
                 } else {
-                    ucs_trace("could not read firmware version (error: %s)",
+                    ucs_debug("could not read firmware version (error: %s)",
                               ucs_status_string(status));
                 }
             }
         }
 
-        ucs_trace("ignoring network device " UCS_SYS_BUS_ID_FMT
+        ucs_debug("ignoring network device " UCS_SYS_BUS_ID_FMT
                   " (pci id " UCS_SYS_PCI_ID_FMT ")",
                   UCS_SYS_BUS_ID_ARG(&device->bus_id),
                   UCS_SYS_PCI_ID_ARG(pci_id));
@@ -248,10 +240,6 @@ ucs_topo_groups_devices_collect(const ucs_topo_sys_device_info_t *devices,
 {
     ucs_topo_groups_sys_dev_array_t *target_array;
     unsigned i;
-
-    ucs_assert(devices != NULL);
-    ucs_assert(acc_devices != NULL);
-    ucs_assert(net_devices != NULL);
 
     for (i = 0; i < num_devices; ++i) {
         if (devices[i].device_class == UCS_TOPO_DEVICE_CLASS_ACC) {
@@ -295,10 +283,6 @@ ucs_topo_groups_gpus_build(const ucs_topo_sys_device_info_t *devices,
     const ucs_sys_device_t *sys_dev;
     ucs_topo_gpu_t *gpu;
 
-    ucs_assert(devices != NULL);
-    ucs_assert(acc_devices != NULL);
-    ucs_assert(gpus != NULL);
-
     if (ucs_array_is_empty(acc_devices)) {
         return UCS_OK;
     }
@@ -338,10 +322,6 @@ ucs_topo_groups_nics_build(const ucs_topo_sys_device_info_t *devices,
     const ucs_sys_bus_id_t *dev_bus_id;
     const ucs_sys_device_t *sys_dev;
     ucs_topo_nic_t *nic;
-
-    ucs_assert(devices != NULL);
-    ucs_assert(net_devices != NULL);
-    ucs_assert(nics != NULL);
 
     if (ucs_array_is_empty(net_devices)) {
         return UCS_OK;
@@ -395,9 +375,6 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
     ucs_topo_groups_sys_dev_array_t net_devices = UCS_ARRAY_DYNAMIC_INITIALIZER;
     ucs_topo_group_t inventory;
     ucs_status_t status;
-
-    ucs_assert(devices != NULL);
-    ucs_assert(inventory_p != NULL);
 
     ucs_topo_init_group(&inventory);
 
