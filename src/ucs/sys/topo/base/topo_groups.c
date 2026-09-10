@@ -175,7 +175,7 @@ out_free_sysfs_path:
 }
 
 static int ucs_topo_groups_is_nic_cx9(const ucs_topo_sys_device_info_t *device,
-                                      const char *reason)
+                                      const char **reason_p)
 {
     const ucs_sys_pci_id_t *pci_id = &device->pci_id;
     const ucs_sys_bus_id_t *bus_id = &device->bus_id;
@@ -183,17 +183,17 @@ static int ucs_topo_groups_is_nic_cx9(const ucs_topo_sys_device_info_t *device,
     ucs_status_t status;
 
     if (pci_id->vendor != UCS_TOPO_GROUPS_MELLANOX_VENDOR_ID) {
-        reason = "not a mellanox device";
+        *reason_p = "not a mellanox device";
         return 0;
     }
 
     if (pci_id->device == UCS_TOPO_GROUPS_CX9_DEVICE_ID) {
-        reason = "cx9 device by device id";
+        *reason_p = "cx9 device by device id";
         return 1;
     }
 
     if (pci_id->device != UCS_TOPO_GROUPS_MLX5_VF_DEVICE_ID) {
-        reason = "not a cx9 device by device id";
+        *reason_p = "not a cx9 device by device id";
         return 0;
     }
 
@@ -203,16 +203,16 @@ static int ucs_topo_groups_is_nic_cx9(const ucs_topo_sys_device_info_t *device,
     if (status != UCS_OK) {
         ucs_debug("could not read firmware version (error: %s)",
                   ucs_status_string(status));
-        reason = "vf device, could not read firmware version";
+        *reason_p = "vf device, could not read firmware version";
         return 0;
     }
 
     if (strncmp(fw_ver, "82.", 3) != 0) {
-        reason = "vf device, firmware version mismatch";
+        *reason_p = "vf device, firmware version mismatch";
         return 0;
     }
 
-    reason = "cx9 device by firmware version";
+    *reason_p = "cx9 device by firmware version";
     return 1;
 }
 
@@ -238,7 +238,7 @@ ucs_topo_groups_nics_cx9_filter(const ucs_topo_sys_device_info_t *devices,
         device  = &devices[sys_dev];
 
         /* TODO: Refactor to have this provided by UCT */
-        is_cx9 = ucs_topo_groups_is_nic_cx9(device, reason);
+        is_cx9 = ucs_topo_groups_is_nic_cx9(device, &reason);
         if (is_cx9) {
             ucs_array_elem(nics, dst++) = sys_dev;
         }
