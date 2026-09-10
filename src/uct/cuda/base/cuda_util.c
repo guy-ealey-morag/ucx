@@ -228,11 +228,10 @@ uct_cuda_init_devices_nvml(const ucs_sys_bus_id_t *visible_gpu_bus_ids,
 
     status = UCT_CUDA_NVML_WRAP_CALL(nvmlDeviceGetCount_v2, &nvml_dev_count);
     if (status != UCS_OK) {
-        ucs_diag("nvml unavailable: using cuda-only gpu enumeration");
+        ucs_debug("nvml unavailable: gpus hidden from the cuda library are not "
+                  "added to the topology");
         return UCS_OK;
     }
-
-    ucs_assert_always(nvml_dev_count <= UCT_CUDA_MAX_DEVICES);
 
     for (i = 0; i < nvml_dev_count; ++i) {
         status = UCT_CUDA_NVML_WRAP_CALL(nvmlDeviceGetHandleByIndex, i,
