@@ -12,6 +12,7 @@ extern "C" {
 #include <ucp/core/ucp_mm.h>
 #include <ucp/core/ucp_types.h>
 #include <ucp/core/ucp_worker.inl>
+#include <ucp/dt/datatype_iter.inl>
 #include <ucp/proto/proto_multi.h>
 #include <ucp/proto/proto_debug.h>
 #include <ucp/proto/proto_select.inl>
@@ -3222,6 +3223,34 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic,
                                     "put/offload/bcopy", endpoint_nics(), 1);
 }
 
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic,
+           managed_cuda_iov_sgl_remain_excluded, "IB_NUM_PATHS?=1",
+           "MAX_RMA_RAILS=3", "MULTI_LANE_MAX_RATIO=4", "ZCOPY_THRESH=0")
+{
+    struct protocol_case {
+        ucp_operation_id_t op_id;
+        ucp_dt_class_t     dt_class;
+        uint8_t            sg_count;
+        const char         *name;
+    };
+    const protocol_case excluded_protocols[] =
+            {{UCP_OP_ID_PUT, UCP_DATATYPE_IOV, 2, "put/offload/zcopy"},
+             {UCP_OP_ID_GET, UCP_DATATYPE_IOV, 2, "get/zcopy"},
+             {UCP_OP_ID_PUT, UCP_DATATYPE_SGL, 0, "put/sgl/offload"},
+             {UCP_OP_ID_PUT, UCP_DATATYPE_SGL, 0, "put/sgl/offload_sw"}};
+
+    install_assignment(mapped_gpu(), {nic(2)});
+    expect_protocol_candidate_count(UCP_OP_ID_PUT, UCS_MEMORY_TYPE_CUDA_MANAGED,
+                                    UCP_DATATYPE_IOV, mapped_gpu(), 2,
+                                    "put/offload/bcopy", endpoint_nics(), 1);
+    for (const auto &protocol : excluded_protocols) {
+        expect_no_protocol_candidate(protocol.op_id,
+                                     UCS_MEMORY_TYPE_CUDA_MANAGED,
+                                     protocol.dt_class, mapped_gpu(),
+                                     protocol.sg_count, protocol.name);
+    }
+}
+
 UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic, empty_iov_sgl_do_not_use_assignment,
            "IB_NUM_PATHS?=1", "MAX_RMA_RAILS=3", "MULTI_LANE_MAX_RATIO=4",
            "ZCOPY_THRESH=0")
@@ -3286,6 +3315,19 @@ protected:
                                          sys_dev, 1, protocol_name, op_flags);
 
         EXPECT_EQ(expected_nics, selected_nics(attr.lane_map)) << protocol_name;
+    }
+
+    void expect_rndv_pipeline_data_nics(ucp_operation_id_t op_id,
+                                        ucs_memory_type_t mem_type,
+                                        ucs_sys_device_t sys_dev,
+                                        const char *protocol_name,
+                                        const sys_dev_set_t &expected_nics)
+    {
+        const ucp_proto_query_attr_t attr =
+                query_protocol_candidate(op_id, mem_type, UCP_DATATYPE_CONTIG,
+                                         sys_dev, 1, protocol_name);
+
+        EXPECT_EQ(expected_nics, configured_nics(attr)) << protocol_name;
     }
 
     ucp_proto_query_attr_t
@@ -3373,19 +3415,31 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda,
            "MULTI_LANE_MAX_RATIO=4")
 {
     const mem_buffer buffer(1, UCS_MEMORY_TYPE_HOST);
-    ucp_memory_info_t mem_info;
+    ucp_request_t req              = {};
+    ucp_rndv_rtr_req_hdr_t rtr_req = {};
 
     ucs_memtype_cache_update(buffer.ptr(), buffer.size(), UCS_MEMORY_TYPE_CUDA,
                              mapped_gpu(), UCS_MEM_FLAG_REGISTRABLE);
-    mem_info = detect_rtr_req_mem_info(buffer.ptr(), buffer.size(),
-                                       UCS_MEMORY_TYPE_UNKNOWN,
-                                       UCS_SYS_DEVICE_ID_UNKNOWN);
+    rtr_req.super.size = buffer.size();
+    rtr_req.address    = reinterpret_cast<uintptr_t>(buffer.ptr());
+    rtr_req.mem_type   = UCS_MEMORY_TYPE_UNKNOWN;
+    rtr_req.sys_dev    = UCS_SYS_DEVICE_ID_UNKNOWN;
+    ucp_proto_rndv_rtr_req_sreq_init(sender().ep(), &req, &rtr_req);
     ucs_memtype_cache_remove(buffer.ptr(), buffer.size());
+
+    EXPECT_EQ(UCS_MEMORY_TYPE_CUDA, req.send.mem_type);
+    EXPECT_EQ(UCS_MEMORY_TYPE_CUDA, req.send.state.dt_iter.mem_info.type);
+    EXPECT_EQ(mapped_gpu(), req.send.state.dt_iter.mem_info.sys_dev);
 
     install_assignment(mapped_gpu(), {nic(2)});
     expect_rndv_protocol_candidates(
-            UCP_OP_ID_RNDV_SEND, static_cast<ucs_memory_type_t>(mem_info.type),
-            mem_info.sys_dev, "rndv/put/zcopy", {nic(2)});
+            UCP_OP_ID_RNDV_SEND,
+            static_cast<ucs_memory_type_t>(
+                    req.send.state.dt_iter.mem_info.type),
+            req.send.state.dt_iter.mem_info.sys_dev, "rndv/put/zcopy",
+            {nic(2)});
+
+    ucp_datatype_iter_cleanup(&req.send.state.dt_iter, 1, UCP_DT_MASK_ALL);
 }
 
 UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda,
@@ -3465,6 +3519,22 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda,
     }
 }
 
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda,
+           concrete_pipeline_preserves_application_assignment, "RNDV_THRESH=1",
+           "RNDV_FRAG_MEM_TYPES=host", "RNDV_FRAG_SIZE=host:8K",
+           "IB_NUM_PATHS?=1", "MAX_RNDV_LANES=3", "MULTI_LANE_MAX_RATIO=4")
+{
+    install_assignment(mapped_gpu(), {nic(2)});
+    for (auto op_id : {UCP_OP_ID_RNDV_RECV, UCP_OP_ID_RNDV_SEND}) {
+        const char *protocol_name = (op_id == UCP_OP_ID_RNDV_RECV) ?
+                                            "rndv/recv/ppln" :
+                                            "rndv/send/ppln";
+
+        expect_rndv_pipeline_data_nics(op_id, UCS_MEMORY_TYPE_CUDA,
+                                       mapped_gpu(), protocol_name, {nic(2)});
+    }
+}
+
 UCS_TEST_SKIP_COND_P(test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda,
                      cuda_staging_uses_staging_assignment,
                      !mem_buffer::is_mem_type_supported(UCS_MEMORY_TYPE_CUDA),
@@ -3506,6 +3576,28 @@ UCS_TEST_SKIP_COND_P(test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda,
         expect_rndv_protocol_candidates(op_id, UCS_MEMORY_TYPE_CUDA_MANAGED,
                                         UCS_SYS_DEVICE_ID_UNKNOWN,
                                         protocol_name, {nic(2)}, ppln_flags);
+    }
+}
+
+UCS_TEST_SKIP_COND_P(test_ucp_proto_mock_rcx_gpu_nic_rndv_cuda,
+                     concrete_pipeline_uses_cuda_staging_assignment,
+                     !mem_buffer::is_mem_type_supported(UCS_MEMORY_TYPE_CUDA),
+                     "RNDV_THRESH=1", "RNDV_FRAG_MEM_TYPES=cuda",
+                     "RNDV_FRAG_SIZE=cuda:8K", "IB_NUM_PATHS?=1",
+                     "MAX_RNDV_LANES=3", "MULTI_LANE_MAX_RATIO=4")
+{
+    const ucs_sys_device_t stage_gpu = local_cuda_staging_sys_dev();
+
+    ASSERT_NE(UCS_SYS_DEVICE_ID_UNKNOWN, stage_gpu);
+    install_assignment(stage_gpu, {nic(2)});
+    for (auto op_id : {UCP_OP_ID_RNDV_RECV, UCP_OP_ID_RNDV_SEND}) {
+        const char *protocol_name = (op_id == UCP_OP_ID_RNDV_RECV) ?
+                                            "rndv/recv/ppln" :
+                                            "rndv/send/ppln";
+
+        expect_rndv_pipeline_data_nics(op_id, UCS_MEMORY_TYPE_CUDA_MANAGED,
+                                       UCS_SYS_DEVICE_ID_UNKNOWN, protocol_name,
+                                       {nic(2)});
     }
 }
 

@@ -232,6 +232,10 @@ ucp_proto_rndv_rtr_req_detect_mem_info(ucp_context_h context,
                                        const ucp_rndv_rtr_req_hdr_t *rtr_req);
 
 
+void ucp_proto_rndv_rtr_req_sreq_init(ucp_ep_h ep, ucp_request_t *req,
+                                      const ucp_rndv_rtr_req_hdr_t *rtr_req);
+
+
 ucs_status_t ucp_proto_rndv_send_start(ucp_worker_h worker,
                                        ucp_request_t *req,
                                        uint32_t op_attr_mask,

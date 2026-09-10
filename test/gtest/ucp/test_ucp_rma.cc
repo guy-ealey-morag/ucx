@@ -323,6 +323,51 @@ protected:
         }
     }
 
+    void test_iov_supplied_memh(ucp_operation_id_t op_id)
+    {
+        static constexpr size_t elem_size = 4 * UCS_KBYTE;
+        static constexpr size_t iov_count = 3;
+        const size_t total_size           = iov_count * elem_size;
+        mapped_buffer local_buffer(total_size, sender(), 0,
+                                   UCS_MEMORY_TYPE_CUDA);
+        mapped_buffer remote_buffer(total_size, receiver());
+        ucs::handle<ucp_rkey_h> rkey = remote_buffer.rkey(sender());
+        ucp_dt_iov_t iov[iov_count];
+        ucp_request_param_t param = {};
+        ucs_status_ptr_t status_ptr;
+
+        init_iov(total_size, iov, iov_count, local_buffer.ptr());
+        if (op_id == UCP_OP_ID_PUT) {
+            local_buffer.pattern_fill(1);
+            remote_buffer.pattern_fill(2);
+        } else {
+            local_buffer.pattern_fill(2);
+            remote_buffer.pattern_fill(1);
+        }
+
+        param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE |
+                             UCP_OP_ATTR_FIELD_MEMH;
+        param.datatype     = DATATYPE_IOV;
+        param.memh         = local_buffer.memh();
+        if (op_id == UCP_OP_ID_PUT) {
+            status_ptr = ucp_put_nbx(sender().ep(), iov, iov_count,
+                                     reinterpret_cast<uintptr_t>(
+                                             remote_buffer.ptr()),
+                                     rkey, &param);
+        } else {
+            status_ptr = ucp_get_nbx(sender().ep(), iov, iov_count,
+                                     reinterpret_cast<uintptr_t>(
+                                             remote_buffer.ptr()),
+                                     rkey, &param);
+        }
+
+        ASSERT_UCS_OK(request_wait(status_ptr));
+        flush_ep(sender());
+        EXPECT_TRUE(mem_buffer::compare(local_buffer.ptr(), remote_buffer.ptr(),
+                                        total_size, UCS_MEMORY_TYPE_CUDA,
+                                        UCS_MEMORY_TYPE_HOST));
+    }
+
     bool is_ep_flush() {
         return get_variant_value() & FLUSH_EP;
     }
@@ -396,6 +441,28 @@ UCS_TEST_SKIP_COND_P(test_ucp_rma_iov_cuda, get_iov_zcopy_multi_buffer_cuda,
     }
 
     test_iov_multi_buffer(UCP_OP_ID_GET);
+}
+
+UCS_TEST_SKIP_COND_P(test_ucp_rma_iov_cuda, put_iov_zcopy_supplied_memh_cuda,
+                     !mem_buffer::is_mem_type_supported(UCS_MEMORY_TYPE_CUDA),
+                     "ZCOPY_THRESH=0")
+{
+    if (!sender().has_lane_with_caps(UCT_IFACE_FLAG_PUT_ZCOPY)) {
+        UCS_TEST_SKIP_R("put_zcopy is not supported");
+    }
+
+    test_iov_supplied_memh(UCP_OP_ID_PUT);
+}
+
+UCS_TEST_SKIP_COND_P(test_ucp_rma_iov_cuda, get_iov_zcopy_supplied_memh_cuda,
+                     !mem_buffer::is_mem_type_supported(UCS_MEMORY_TYPE_CUDA),
+                     "ZCOPY_THRESH=0")
+{
+    if (!sender().has_lane_with_caps(UCT_IFACE_FLAG_GET_ZCOPY)) {
+        UCS_TEST_SKIP_R("get_zcopy is not supported");
+    }
+
+    test_iov_supplied_memh(UCP_OP_ID_GET);
 }
 
 UCS_TEST_SKIP_COND_P(test_ucp_rma_iov_cuda, put_iov_heterogeneous_mem_types,

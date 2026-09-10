@@ -1073,9 +1073,8 @@ ucp_proto_rndv_rtr_req_detect_mem_info(ucp_context_h context,
     return mem_info;
 }
 
-static void
-ucp_proto_rndv_rtr_req_sreq_init(ucp_ep_h ep, ucp_request_t *req,
-                                 const ucp_rndv_rtr_req_hdr_t *rtr_req)
+void ucp_proto_rndv_rtr_req_sreq_init(ucp_ep_h ep, ucp_request_t *req,
+                                      const ucp_rndv_rtr_req_hdr_t *rtr_req)
 {
     const ucp_rndv_rtr_hdr_t *rtr = &rtr_req->super;
     ucp_memory_info_t mem_info    = ucp_proto_rndv_rtr_req_detect_mem_info(
