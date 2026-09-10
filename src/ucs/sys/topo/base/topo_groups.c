@@ -174,7 +174,8 @@ out_free_sysfs_path:
     return status;
 }
 
-static int ucs_topo_groups_is_nic_cx9(const ucs_topo_sys_device_info_t *device)
+static int ucs_topo_groups_is_nic_cx9(const ucs_topo_sys_device_info_t *device,
+                                      const char *reason)
 {
     const ucs_sys_pci_id_t *pci_id = &device->pci_id;
     const ucs_sys_bus_id_t *bus_id = &device->bus_id;
@@ -182,19 +183,19 @@ static int ucs_topo_groups_is_nic_cx9(const ucs_topo_sys_device_info_t *device)
     ucs_status_t status;
 
     if (pci_id->vendor != UCS_TOPO_GROUPS_MELLANOX_VENDOR_ID) {
+        reason = "not a mellanox device";
         return 0;
     }
 
     if (pci_id->device == UCS_TOPO_GROUPS_CX9_DEVICE_ID) {
-        ucs_debug("cx9 device found (device id)");
+        reason = "cx9 device by device id";
         return 1;
     }
 
     if (pci_id->device != UCS_TOPO_GROUPS_MLX5_VF_DEVICE_ID) {
+        reason = "not a cx9 device by device id";
         return 0;
     }
-
-    ucs_debug("mlx5 VF device found");
 
     /* PCI device ID is not indicative when the device is a VF, instead use
      * the fact that fw version is 82.XX.XXXX for CX9 */
@@ -202,15 +203,16 @@ static int ucs_topo_groups_is_nic_cx9(const ucs_topo_sys_device_info_t *device)
     if (status != UCS_OK) {
         ucs_debug("could not read firmware version (error: %s)",
                   ucs_status_string(status));
+        reason = "vf device, could not read firmware version";
         return 0;
     }
 
     if (strncmp(fw_ver, "82.", 3) != 0) {
-        ucs_debug("firmware version mismatch: %s", fw_ver);
+        reason = "vf device, firmware version mismatch";
         return 0;
     }
 
-    ucs_debug("cx9 device found (firmware version)");
+    reason = "cx9 device by firmware version";
     return 1;
 }
 
@@ -221,7 +223,9 @@ ucs_topo_groups_nics_cx9_filter(const ucs_topo_sys_device_info_t *devices,
     size_t dst = 0;
     const ucs_topo_sys_device_info_t *device;
     ucs_sys_device_t sys_dev;
+    const char *reason;
     size_t src;
+    int is_cx9;
 
     if (ucs_array_is_empty(nics)) {
         return;
@@ -233,21 +237,19 @@ ucs_topo_groups_nics_cx9_filter(const ucs_topo_sys_device_info_t *devices,
         sys_dev = ucs_array_elem(nics, src);
         device  = &devices[sys_dev];
 
-        ucs_debug("cx9_filter: processing network device sys_dev=%u, "
-                  "bus_id=" UCS_SYS_BUS_ID_FMT ", pci_id=" UCS_SYS_PCI_ID_FMT,
-                  sys_dev, UCS_SYS_BUS_ID_ARG(&device->bus_id),
-                  UCS_SYS_PCI_ID_ARG(&device->pci_id));
-
-        ucs_log_indent(1);
-
         /* TODO: Refactor to have this provided by UCT */
-        if (ucs_topo_groups_is_nic_cx9(device)) {
+        is_cx9 = ucs_topo_groups_is_nic_cx9(device, reason);
+        if (is_cx9) {
             ucs_array_elem(nics, dst++) = sys_dev;
-        } else {
-            ucs_debug("network device is not CX9, skipping");
         }
 
-        ucs_log_indent(-1);
+        ucs_debug("cx9_filter: network device sys_dev=%u, "
+                  "bus_id=" UCS_SYS_BUS_ID_FMT ", pci_id=" UCS_SYS_PCI_ID_FMT
+                  " %s (%s)",
+                  sys_dev, UCS_SYS_BUS_ID_ARG(&device->bus_id),
+                  UCS_SYS_PCI_ID_ARG(&device->pci_id),
+                  is_cx9 ? "added" : "skipped",
+                  reason);
     }
 
     ucs_array_set_length(nics, dst);
@@ -278,24 +280,11 @@ ucs_topo_groups_devices_collect(const ucs_topo_sys_device_info_t *devices,
     return UCS_OK;
 }
 
-static int ucs_topo_groups_bus_id_match(ucs_topo_device_class_t device_class,
-                                        const ucs_sys_bus_id_t *bus_id1,
-                                        const ucs_sys_bus_id_t *bus_id2)
-{
-    if (device_class == UCS_TOPO_DEVICE_CLASS_ACC) {
-        /* Accelerator devices (GPUs) are grouped by full bus id equality. */
-        return ucs_topo_groups_bus_id_equal(bus_id1, bus_id2);
-    }
-
-    /* Network devices (NICs) are grouped by bdf equality excl. the function. */
-    ucs_assert(device_class == UCS_TOPO_DEVICE_CLASS_NET);
-    return ucs_topo_groups_bus_id_same_slot(bus_id1, bus_id2);
-}
-
 static ucs_status_t ucs_topo_groups_elements_build(
         const ucs_topo_sys_device_info_t *devices,
         const ucs_topo_groups_sys_dev_array_t *sys_devices,
-        const ucs_topo_device_class_t device_class,
+        int (*bus_id_match)(const ucs_sys_bus_id_t *bus_id1,
+                            const ucs_sys_bus_id_t *bus_id2),
         ucs_topo_group_element_array_t *elements)
 {
     const ucs_sys_bus_id_t *bus_id, *prev_bus_id;
@@ -306,16 +295,13 @@ static ucs_status_t ucs_topo_groups_elements_build(
         return UCS_OK;
     }
 
-    ucs_assert((device_class == UCS_TOPO_DEVICE_CLASS_ACC) ||
-               (device_class == UCS_TOPO_DEVICE_CLASS_NET));
     ucs_assert(ucs_array_begin(sys_devices) != NULL);
 
     prev_bus_id = NULL;
     ucs_array_for_each(sys_dev, sys_devices) {
         bus_id = &devices[*sys_dev].bus_id;
 
-        if ((prev_bus_id == NULL) ||
-            !ucs_topo_groups_bus_id_match(device_class, prev_bus_id, bus_id)) {
+        if ((prev_bus_id == NULL) || !bus_id_match(prev_bus_id, bus_id)) {
             /* No match, add a new element. */
             element = ucs_array_append(elements, return UCS_ERR_NO_MEMORY);
             memset(element, 0, sizeof(*element));
@@ -393,15 +379,17 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
         ucs_topo_groups_nics_cx9_filter(devices, &net_devices);
     }
 
+    /* Accelerator devices (GPUs) are grouped by full bus id equality. */
     status = ucs_topo_groups_elements_build(devices, &acc_devices,
-                                            UCS_TOPO_DEVICE_CLASS_ACC,
+                                            ucs_topo_groups_bus_id_equal,
                                             &inventory.gpus);
     if (status != UCS_OK) {
         goto err_free_arrays;
     }
 
+    /* Network devices (NICs) are grouped by bdf equality excl. the function. */
     status = ucs_topo_groups_elements_build(devices, &net_devices,
-                                            UCS_TOPO_DEVICE_CLASS_NET,
+                                            ucs_topo_groups_bus_id_same_slot,
                                             &inventory.nics);
     if (status != UCS_OK) {
         goto err_free_arrays;
