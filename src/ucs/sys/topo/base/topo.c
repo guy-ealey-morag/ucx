@@ -286,25 +286,22 @@ int ucs_topo_sys_device_info_cmp(const ucs_topo_sys_device_info_t *device1,
            (device1->user_value < device2->user_value);
 }
 
-int ucs_topo_sys_device_cmp_nolock(ucs_sys_device_t sys_dev1,
-                                   ucs_sys_device_t sys_dev2)
-{
-    ucs_assertv(sys_dev1 < ucs_topo_global_ctx.num_devices,
-                "invalid sys_dev1: %u", sys_dev1);
-    ucs_assertv(sys_dev2 < ucs_topo_global_ctx.num_devices,
-                "invalid sys_dev2: %u", sys_dev2);
-
-    return ucs_topo_sys_device_info_cmp(&ucs_topo_global_ctx.devices[sys_dev1],
-                                        &ucs_topo_global_ctx.devices[sys_dev2]);
-}
-
 int ucs_topo_sys_device_cmp(ucs_sys_device_t sys_dev1,
                             ucs_sys_device_t sys_dev2)
 {
     int result;
 
     ucs_spin_lock(&ucs_topo_global_ctx.lock);
-    result = ucs_topo_sys_device_cmp_nolock(sys_dev1, sys_dev2);
+
+    ucs_assertv(sys_dev1 < ucs_topo_global_ctx.num_devices,
+                "invalid sys_dev1: %u", sys_dev1);
+    ucs_assertv(sys_dev2 < ucs_topo_global_ctx.num_devices,
+                "invalid sys_dev2: %u", sys_dev2);
+
+    result = ucs_topo_sys_device_info_cmp(
+            &ucs_topo_global_ctx.devices[sys_dev1],
+            &ucs_topo_global_ctx.devices[sys_dev2]);
+
     ucs_spin_unlock(&ucs_topo_global_ctx.lock);
 
     return result;
