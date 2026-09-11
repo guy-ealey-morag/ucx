@@ -36,15 +36,14 @@ UCS_ARRAY_DECLARE_TYPE(ucs_topo_groups_numa_node_array_t, size_t,
                        ucs_numa_node_t);
 
 
-static int ucs_topo_groups_sys_dev_cmp(const void *elem1, const void *elem2,
-                                       void *arg)
+static int
+ucs_topo_groups_sys_dev_cmp(const void *elem1, const void *elem2, void *arg)
 {
     const ucs_topo_sys_device_info_t *devices = arg;
     ucs_sys_device_t sys_dev1 = *(const ucs_sys_device_t*)elem1;
     ucs_sys_device_t sys_dev2 = *(const ucs_sys_device_t*)elem2;
 
-    return ucs_topo_sys_device_info_cmp(&devices[sys_dev1],
-                                        &devices[sys_dev2]);
+    return ucs_topo_sys_device_info_cmp(&devices[sys_dev1], &devices[sys_dev2]);
 }
 
 static void
@@ -254,8 +253,7 @@ ucs_topo_groups_nics_cx9_filter(const ucs_topo_sys_device_info_t *devices,
                   " %s (%s)",
                   sys_dev, UCS_SYS_BUS_ID_ARG(&device->bus_id),
                   UCS_SYS_PCI_ID_ARG(&device->pci_id),
-                  is_cx9 ? "added" : "skipped",
-                  reason);
+                  is_cx9 ? "added" : "skipped", reason);
     }
 
     ucs_array_set_length(nics, dst);
@@ -420,11 +418,10 @@ err_free_arrays:
     return status;
 }
 
-static ucs_status_t
-ucs_topo_groups_get_or_add_group(ucs_numa_node_t numa_node,
-                                 ucs_topo_groups_numa_node_array_t *numa_nodes,
-                                 ucs_topo_groups_t *groups,
-                                 ucs_topo_group_t **group_p)
+static ucs_status_t ucs_topo_groups_get_or_add_group_by_numa_node(
+        ucs_numa_node_t numa_node,
+        ucs_topo_groups_numa_node_array_t *numa_nodes,
+        ucs_topo_groups_t *groups, ucs_topo_group_t **group_p)
 {
     ucs_topo_group_t *group;
     size_t i;
@@ -469,8 +466,9 @@ static ucs_status_t ucs_topo_groups_build_groups_by_numa_node(
             goto out_cleanup_numa_nodes;
         }
 
-        status = ucs_topo_groups_get_or_add_group(numa_node, &numa_nodes,
-                                                  groups, &group);
+        status = ucs_topo_groups_get_or_add_group_by_numa_node(numa_node,
+                                                               &numa_nodes,
+                                                               groups, &group);
         if (status != UCS_OK) {
             goto out_cleanup_numa_nodes;
         }
@@ -491,8 +489,9 @@ static ucs_status_t ucs_topo_groups_build_groups_by_numa_node(
             goto out_cleanup_numa_nodes;
         }
 
-        status = ucs_topo_groups_get_or_add_group(numa_node, &numa_nodes,
-                                                  groups, &group);
+        status = ucs_topo_groups_get_or_add_group_by_numa_node(numa_node,
+                                                               &numa_nodes,
+                                                               groups, &group);
         if (status != UCS_OK) {
             goto out_cleanup_numa_nodes;
         }
@@ -533,10 +532,10 @@ ucs_topo_groups_append_device_names(const ucs_topo_sys_device_info_t *devices,
     }
 }
 
-static void ucs_topo_groups_format_elements(
-        const ucs_topo_sys_device_info_t *devices,
-        const ucs_topo_group_element_array_t *elements,
-        ucs_string_buffer_t *strb)
+static void
+ucs_topo_groups_format_elements(const ucs_topo_sys_device_info_t *devices,
+                                const ucs_topo_group_element_array_t *elements,
+                                ucs_string_buffer_t *strb)
 {
     const ucs_topo_group_element_t *element;
     size_t i = 0;
@@ -630,8 +629,6 @@ ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
     if (ucs_log_is_enabled(UCS_LOG_LEVEL_DEBUG)) {
         ucs_topo_groups_log(devices, &groups);
     }
-
-    /* TODO: Validate Vera-Rubin groups: 2 GPUs and 4 NICs per group. */
 
     ucs_topo_release_group(&inventory);
 
