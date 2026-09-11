@@ -19,6 +19,9 @@ class test_topo_groups : public ucs::test {
 protected:
     using physical_device = std::vector<ucs_sys_device_t>;
 
+    static constexpr int num_devices_per_gpu = 2;
+    static constexpr int num_ports_per_nic   = 2;
+
     struct numa_devices {
         ucs_numa_node_t              numa_node;
         std::vector<physical_device> gpus;
@@ -129,8 +132,8 @@ protected:
             physical_device gpu_devices;
 
             /* Add devices in reverse order to test that the sorting is correct */
-            for (int device_idx = UCS_TOPO_MAX_DEVICES_PER_GPU - 1;
-                 device_idx >= 0; --device_idx) {
+            for (int device_idx = num_devices_per_gpu - 1; device_idx >= 0;
+                 --device_idx) {
                 const std::string &name = "numa" + std::to_string(numa_idx) +
                                           "_gpu" + std::to_string(gpu_idx) +
                                           "." + std::to_string(device_idx);
@@ -164,7 +167,7 @@ protected:
             physical_device nic_ports;
 
             /* Add ports in reverse order to test that the sorting is correct */
-            for (int port_idx = UCS_TOPO_MAX_PORTS_PER_NIC - 1; port_idx >= 0;
+            for (int port_idx = num_ports_per_nic - 1; port_idx >= 0;
                  --port_idx) {
                 const std::string &name = "numa" + std::to_string(numa_idx) +
                                           "_nic" + std::to_string(nic_idx) +
@@ -207,11 +210,11 @@ protected:
         return expected_result;
     }
 
-    ucs_status_t build(ucs_topo_groups_type_t groups_type)
+    ucs_status_t build()
     {
         ucs_status_t const status = ucs_topo_build_groups_inner(
                 m_devices.data(), static_cast<unsigned>(m_devices.size()),
-                groups_type, &m_groups);
+                &m_groups);
 
         if (status == UCS_OK) {
             m_groups_initialized = true;
@@ -228,20 +231,22 @@ protected:
         ASSERT_EQ(expected_nics.size(), ucs_array_length(&group.nics));
 
         for (size_t i = 0; i < expected_gpus.size(); ++i) {
-            const ucs_topo_gpu_t &gpu = ucs_array_elem(&group.gpus, i);
+            const ucs_topo_group_element_t &gpu =
+                    ucs_array_elem(&group.gpus, i);
 
-            ASSERT_EQ(expected_gpus[i].size(), gpu.num_devices);
+            ASSERT_EQ(expected_gpus[i].size(), gpu.num_sys_devs);
             for (size_t j = 0; j < expected_gpus[i].size(); ++j) {
-                EXPECT_EQ(expected_gpus[i][j], gpu.devices[j]);
+                EXPECT_EQ(expected_gpus[i][j], gpu.sys_devs[j]);
             }
         }
 
         for (size_t i = 0; i < expected_nics.size(); ++i) {
-            const ucs_topo_nic_t &nic = ucs_array_elem(&group.nics, i);
+            const ucs_topo_group_element_t &nic =
+                    ucs_array_elem(&group.nics, i);
 
-            ASSERT_EQ(expected_nics[i].size(), nic.num_ports);
+            ASSERT_EQ(expected_nics[i].size(), nic.num_sys_devs);
             for (size_t j = 0; j < expected_nics[i].size(); ++j) {
-                EXPECT_EQ(expected_nics[i][j], nic.ports[j]);
+                EXPECT_EQ(expected_nics[i][j], nic.sys_devs[j]);
             }
         }
     }
@@ -262,20 +267,12 @@ protected:
 UCS_TEST_F(test_topo_groups, clique_groups_by_numa) {
     const std::vector<numa_devices> expected_groups = add_vera_rubin_devices();
 
-    ASSERT_UCS_OK(build(UCS_TOPO_GROUPS_TYPE_CLIQUE));
+    ASSERT_UCS_OK(build());
 
-    ASSERT_EQ(UCS_TOPO_GROUPS_TYPE_CLIQUE, m_groups.type);
-    ASSERT_EQ(expected_groups.size(), ucs_array_length(&m_groups.groups));
+    ASSERT_EQ(expected_groups.size(), ucs_array_length(&m_groups));
 
     for (size_t i = 0; i < expected_groups.size(); ++i) {
-        expect_group(ucs_array_elem(&m_groups.groups, i),
+        expect_group(ucs_array_elem(&m_groups, i),
                      expected_groups[i].gpus, expected_groups[i].nics);
     }
-}
-
-UCS_TEST_F(test_topo_groups, unknown_returns_empty) {
-    ASSERT_UCS_OK(build(UCS_TOPO_GROUPS_TYPE_UNKNOWN));
-
-    EXPECT_EQ(UCS_TOPO_GROUPS_TYPE_UNKNOWN, m_groups.type);
-    EXPECT_EQ(0u, ucs_array_length(&m_groups.groups));
 }

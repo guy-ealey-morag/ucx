@@ -37,14 +37,13 @@ public:
 
 protected:
     struct topology_shape_t {
-        ucs_topo_groups_type_t type;
-        size_t                 num_groups;
-        size_t                 num_gpus_per_group;
-        size_t                 num_nics_per_group;
-        size_t                 num_gpu_devices;
-        size_t                 num_nic_ports;
+        size_t num_groups;
+        size_t num_gpus_per_group;
+        size_t num_nics_per_group;
+        size_t num_gpu_devices;
+        size_t num_nic_ports;
 
-        size_t                 num_gpus() const noexcept
+        size_t num_gpus() const noexcept
         {
             return num_groups * num_gpus_per_group;
         }
@@ -80,20 +79,19 @@ protected:
     void build_groups(const topology_shape_t &config)
     {
         ucs_topo_group_t *group;
-        ucs_topo_gpu_t *gpu;
-        ucs_topo_nic_t *nic;
+        ucs_topo_group_element_t *gpu;
+        ucs_topo_group_element_t *nic;
 
         if (m_groups_initialized) {
             ucs_topo_release_groups(&m_groups);
             m_groups_initialized = false;
         }
 
-        ucs_array_init_dynamic(&m_groups.groups);
-        m_groups.type        = config.type;
+        ucs_array_init_dynamic(&m_groups);
         m_groups_initialized = true;
 
         for (size_t group_idx = 0; group_idx < config.num_groups; ++group_idx) {
-            group = ucs_array_append(&m_groups.groups,
+            group = ucs_array_append(&m_groups,
                                      FAIL() << "Failed to append group");
             ucs_topo_init_group(group);
 
@@ -104,13 +102,13 @@ protected:
                 std::memset(gpu, 0, sizeof(*gpu));
                 const size_t gpu_idx = (group_idx * config.num_gpus_per_group) +
                                        local_idx;
-                gpu->num_devices     = config.num_gpu_devices;
+                gpu->num_sys_devs    = config.num_gpu_devices;
 
                 for (size_t gpu_device_idx = 0;
                      gpu_device_idx < config.num_gpu_devices;
                      ++gpu_device_idx) {
-                    gpu->devices[gpu_device_idx] = gpu_sys_dev(config, gpu_idx,
-                                                               gpu_device_idx);
+                    gpu->sys_devs[gpu_device_idx] = gpu_sys_dev(config, gpu_idx,
+                                                                gpu_device_idx);
                 }
             }
 
@@ -121,12 +119,12 @@ protected:
                 std::memset(nic, 0, sizeof(*nic));
                 const size_t nic_idx = (group_idx * config.num_nics_per_group) +
                                        local_idx;
-                nic->num_ports       = config.num_nic_ports;
+                nic->num_sys_devs    = config.num_nic_ports;
 
                 for (size_t port_idx = 0; port_idx < config.num_nic_ports;
                      ++port_idx) {
-                    nic->ports[port_idx] = nic_port_sys_dev(config, nic_idx,
-                                                            port_idx);
+                    nic->sys_devs[port_idx] = nic_port_sys_dev(config, nic_idx,
+                                                               port_idx);
                 }
             }
         }
@@ -198,7 +196,7 @@ protected:
                 ASSERT_NE(nullptr, nic_sys_dev_bitmap);
 
                 size_t port_idx         = 0;
-                const bool gpu_owns_nic = ucp_gpu_nic_bitmap_test(
+                const bool gpu_owns_nic = ucp_gpu_nic_bitmap_get(
                         nic_sys_dev_bitmap,
                         nic_port_sys_dev(config, nic_idx, port_idx));
 
@@ -206,7 +204,7 @@ protected:
                 for (port_idx = 1; port_idx < config.num_nic_ports;
                      ++port_idx) {
                     EXPECT_EQ(gpu_owns_nic,
-                              ucp_gpu_nic_bitmap_test(
+                              ucp_gpu_nic_bitmap_get(
                                       nic_sys_dev_bitmap,
                                       nic_port_sys_dev(config, nic_idx,
                                                        port_idx)));
@@ -218,9 +216,8 @@ protected:
                 }
 
                 EXPECT_EQ(gpu_idx == expected_owner, gpu_owns_nic);
-                EXPECT_FALSE(
-                        ucp_gpu_nic_bitmap_test(nic_sys_dev_bitmap,
-                                                UCS_SYS_DEVICE_ID_UNKNOWN));
+                EXPECT_FALSE(ucp_gpu_nic_bitmap_get(nic_sys_dev_bitmap,
+                                                    UCS_SYS_DEVICE_ID_UNKNOWN));
             }
 
             EXPECT_EQ(expected_owner, actual_owner);
@@ -247,8 +244,8 @@ protected:
         ASSERT_NE(config.num_nic_ports, 0);
         ASSERT_NE(config.num_gpu_devices, 0);
 
-        ASSERT_LE(config.num_gpu_devices, UCS_TOPO_MAX_DEVICES_PER_GPU);
-        ASSERT_LE(config.num_nic_ports, UCS_TOPO_MAX_PORTS_PER_NIC);
+        ASSERT_LE(config.num_gpu_devices, UCS_TOPO_MAX_SYS_DEVS_PER_ELEMENT);
+        ASSERT_LE(config.num_nic_ports, UCS_TOPO_MAX_SYS_DEVS_PER_ELEMENT);
 
         ASSERT_LE(config.first_nic_port_sys_dev() +
                           (config.num_nics() * config.num_nic_ports),
@@ -283,7 +280,6 @@ protected:
     {
         topology_shape_t config;
 
-        config.type               = UCS_TOPO_GROUPS_TYPE_CLIQUE;
         config.num_groups         = num_groups;
         config.num_gpus_per_group = num_gpus_per_group;
         config.num_nics_per_group = num_nics_per_group;

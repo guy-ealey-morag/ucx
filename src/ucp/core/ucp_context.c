@@ -18,6 +18,7 @@
 #include <ucs/algorithm/qsort_r.h>
 #include <ucs/algorithm/crc.h>
 #include <ucs/arch/atomic.h>
+#include <ucs/arch/cpu.h>
 #include <ucs/datastruct/mpool.inl>
 #include <ucs/datastruct/queue.h>
 #include <ucs/datastruct/string_set.h>
@@ -2762,24 +2763,18 @@ static ucs_status_t ucp_context_gpu_nic_assignment_init(ucp_context_h context)
     ucs_topo_groups_t groups;
     ucs_status_t status;
 
+    if (ucs_arch_get_cpu_model() != UCS_CPU_MODEL_NVIDIA_VERA) {
+        ucs_debug("gpu-nic assignment is not supported on %s architecture",
+                  ucs_cpu_model_name());
+        return UCS_OK;
+    }
+
     status = ucs_topo_build_groups(&groups);
     if (status != UCS_OK) {
         return status;
     }
 
-    if (groups.type == UCS_TOPO_GROUPS_TYPE_UNKNOWN) {
-        goto out_release_groups;
-    }
-
-    if (groups.type != UCS_TOPO_GROUPS_TYPE_CLIQUE) {
-        ucs_error("invalid topology groups type %d", groups.type);
-        status = UCS_ERR_INVALID_PARAM;
-        goto out_release_groups;
-    }
-
-    if (ucs_array_is_empty(&groups.groups)) {
-        ucs_error("topology has no groups");
-        status = UCS_ERR_INVALID_PARAM;
+    if (ucs_array_is_empty(&groups)) {
         goto out_release_groups;
     }
 
@@ -2804,9 +2799,8 @@ static ucs_status_t ucp_context_gpu_nic_assignment_init(ucp_context_h context)
         goto out_release_groups;
     }
 
-    status = ucp_gpu_nic_assignment_build(&groups,
-                                          UCP_GPU_NIC_ASSIGNMENT_POLICY_FLIP,
-                                          assignment);
+    status = ucp_gpu_nic_assignment_build(
+            &groups, UCP_GPU_NIC_ASSIGNMENT_POLICY_FLIP, assignment);
     if (status != UCS_OK) {
         ucs_free(assignment);
         goto out_release_groups;

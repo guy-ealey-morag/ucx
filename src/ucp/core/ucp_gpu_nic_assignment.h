@@ -32,14 +32,18 @@ typedef struct {
 
 typedef enum {
     /**
-     * Assign each run of NICs forward and then backward across the GPUs:
-     * 0, 1, ..., N-1, N-1, ..., 1, 0.
+     * Assign each NIC, with all of its ports, going forward and then backward
+     * across the GPUs.
+     * The group's NICs are assigned to the following GPU indices in order:
+     * 0, 1, ..., num_gpus-1, num_gpus-1, ..., 1, 0, 0, 1, ...
      */
     UCP_GPU_NIC_ASSIGNMENT_POLICY_FLIP,
 
     /**
-     * Assign NICs to GPUs repeatedly in ascending order:
-     * 0, 1, ..., N-1, 0, 1, ...
+     * Assign each NIC, with all of its ports, to GPUs repeatedly in ascending
+     * order.
+     * The group's NICs are assigned to the following GPU indices in order:
+     * 0, 1, ..., num_gpus-1, 0, 1, ..., num_gpus-1, 0, 1, ...
      */
     UCP_GPU_NIC_ASSIGNMENT_POLICY_ROUND_ROBIN,
 
@@ -87,8 +91,8 @@ ucp_gpu_nic_assignment_lookup(const ucp_gpu_nic_assignment_t *assignment,
  * @return Nonzero if @a net_sys_dev is present in @a bitmap, or zero if the
  *         system device is unknown or the bit is not set.
  */
-int ucp_gpu_nic_bitmap_test(const ucp_gpu_nic_sys_dev_bitmap_t *bitmap,
-                            ucs_sys_device_t net_sys_dev);
+int ucp_gpu_nic_bitmap_get(const ucp_gpu_nic_sys_dev_bitmap_t *bitmap,
+                           ucs_sys_device_t net_sys_dev);
 
 
 /**

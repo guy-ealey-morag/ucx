@@ -48,6 +48,13 @@ typedef struct {
 
 
 /**
+ * Compare two system device information entries by their topology identity.
+ */
+int ucs_topo_sys_device_info_cmp(const ucs_topo_sys_device_info_t *device1,
+                                 const ucs_topo_sys_device_info_t *device2);
+
+
+/**
  * Convert a PCI bus id to its canonical sysfs path.
  *
  * @param [in]  bus_id  Device PCI bus id.
