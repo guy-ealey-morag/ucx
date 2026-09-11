@@ -9,6 +9,7 @@
 #endif
 
 #include "topo_groups.h"
+#include "topo_int.h"
 
 #include <ucs/algorithm/qsort_r.h>
 #include <ucs/datastruct/array.h>
@@ -23,7 +24,10 @@
 #include <string.h>
 
 
-#define UCS_TOPO_GROUPS_FW_VER_MAX 64
+#define UCS_TOPO_GROUPS_MELLANOX_VENDOR_ID 0x15b3
+#define UCS_TOPO_GROUPS_CX9_DEVICE_ID      0x1025
+#define UCS_TOPO_GROUPS_MLX5_VF_DEVICE_ID  0x101e
+#define UCS_TOPO_GROUPS_FW_VER_MAX         64
 
 
 UCS_ARRAY_DECLARE_TYPE(ucs_topo_groups_sys_dev_array_t, size_t,
@@ -32,26 +36,15 @@ UCS_ARRAY_DECLARE_TYPE(ucs_topo_groups_numa_node_array_t, size_t,
                        ucs_numa_node_t);
 
 
-static int
-ucs_topo_groups_sys_dev_cmp(const void *elem1, const void *elem2, void *arg)
+static int ucs_topo_groups_sys_dev_cmp(const void *elem1, const void *elem2,
+                                       void *arg)
 {
     const ucs_topo_sys_device_info_t *devices = arg;
     ucs_sys_device_t sys_dev1 = *(const ucs_sys_device_t*)elem1;
     ucs_sys_device_t sys_dev2 = *(const ucs_sys_device_t*)elem2;
-    ucs_bus_id_bit_rep_t bus_id1, bus_id2;
-    uintptr_t user_value1, user_value2;
 
-    bus_id1 = ucs_topo_get_bus_id_bit_repr(&devices[sys_dev1].bus_id);
-    bus_id2 = ucs_topo_get_bus_id_bit_repr(&devices[sys_dev2].bus_id);
-
-    if (bus_id1 != bus_id2) {
-        return (bus_id1 > bus_id2) - (bus_id1 < bus_id2);
-    }
-
-    user_value1 = devices[sys_dev1].user_value;
-    user_value2 = devices[sys_dev2].user_value;
-
-    return (user_value1 > user_value2) - (user_value1 < user_value2);
+    return ucs_topo_sys_device_info_cmp(&devices[sys_dev1],
+                                        &devices[sys_dev2]);
 }
 
 static void
@@ -62,40 +55,37 @@ ucs_topo_groups_sys_dev_sort(ucs_topo_groups_sys_dev_array_t *sys_devs,
         return;
     }
 
+    ucs_assert(ucs_array_begin(sys_devs) != NULL);
+
     ucs_qsort_r(ucs_array_begin(sys_devs), ucs_array_length(sys_devs),
                 sizeof(*ucs_array_begin(sys_devs)), ucs_topo_groups_sys_dev_cmp,
                 (void*)devices);
 }
 
-/* Compact the array by removing unknown devices. */
-static void
-ucs_topo_groups_sys_dev_compact(ucs_topo_groups_sys_dev_array_t *sys_devs)
+/* Compare two bus ids up to their slot (excluding the function). */
+static int ucs_topo_groups_bus_id_same_slot(const ucs_sys_bus_id_t *bus_id1,
+                                            const ucs_sys_bus_id_t *bus_id2)
 {
-    size_t dst = 0;
-    size_t src;
+    return (bus_id1->domain == bus_id2->domain) &&
+           (bus_id1->bus == bus_id2->bus) && (bus_id1->slot == bus_id2->slot);
+}
 
-    for (src = 0; src < ucs_array_length(sys_devs); ++src) {
-        if (ucs_array_elem(sys_devs, src) != UCS_SYS_DEVICE_ID_UNKNOWN) {
-            ucs_array_elem(sys_devs, dst++) = ucs_array_elem(sys_devs, src);
-        }
-    }
-
-    for (src = dst; src < ucs_array_length(sys_devs); ++src) {
-        ucs_array_elem(sys_devs, src) = UCS_SYS_DEVICE_ID_UNKNOWN;
-    }
-
-    ucs_array_set_length(sys_devs, dst);
+/* Compare two bus ids. */
+static int ucs_topo_groups_bus_id_equal(const ucs_sys_bus_id_t *bus_id1,
+                                        const ucs_sys_bus_id_t *bus_id2)
+{
+    return ucs_topo_groups_bus_id_same_slot(bus_id1, bus_id2) &&
+           (bus_id1->function == bus_id2->function);
 }
 
 /* This filter is required because currently CUDA gpus may have duplicates in
  * the devices array due to duplicate insertion by NVML and the CUDA driver. */
 static void
-ucs_topo_groups_gpu_aliases_filter(ucs_topo_groups_sys_dev_array_t *gpus,
-                                   const ucs_topo_sys_device_info_t *devices)
+ucs_topo_groups_gpu_aliases_filter(const ucs_topo_sys_device_info_t *devices,
+                                   ucs_topo_groups_sys_dev_array_t *gpus)
 {
-    ucs_bus_id_bit_rep_t bus_id1, bus_id2;
     ucs_sys_device_t sys_dev1, sys_dev2;
-    size_t i;
+    size_t src, dst, i;
 
     if (ucs_array_length(gpus) < 2) {
         return;
@@ -106,11 +96,10 @@ ucs_topo_groups_gpu_aliases_filter(ucs_topo_groups_sys_dev_array_t *gpus,
         sys_dev1 = ucs_array_elem(gpus, i);
         sys_dev2 = ucs_array_elem(gpus, i + 1);
 
-        bus_id1 = ucs_topo_get_bus_id_bit_repr(&devices[sys_dev1].bus_id);
-        bus_id2 = ucs_topo_get_bus_id_bit_repr(&devices[sys_dev2].bus_id);
-
-        if ((bus_id1 == bus_id2) &&
+        if (ucs_topo_groups_bus_id_equal(&devices[sys_dev1].bus_id,
+                                         &devices[sys_dev2].bus_id) &&
             (devices[sys_dev2].user_value == UCS_SYS_DEVICE_USER_VALUE_EMPTY)) {
+            /* Mark the device as unknown to be removed later. */
             ucs_array_elem(gpus, i + 1) = UCS_SYS_DEVICE_ID_UNKNOWN;
 
             /* Promised by sorting. */
@@ -123,7 +112,17 @@ ucs_topo_groups_gpu_aliases_filter(ucs_topo_groups_sys_dev_array_t *gpus,
         }
     }
 
-    ucs_topo_groups_sys_dev_compact(gpus);
+    /* Compact the array by removing unknown devices. */
+    dst = 0;
+    for (src = 0; src < ucs_array_length(gpus); ++src) {
+        if (ucs_array_elem(gpus, src) == UCS_SYS_DEVICE_ID_UNKNOWN) {
+            continue;
+        }
+
+        ucs_array_elem(gpus, dst++) = ucs_array_elem(gpus, src);
+    }
+
+    ucs_array_set_length(gpus, dst);
 }
 
 static ucs_status_t
@@ -181,61 +180,85 @@ out_free_sysfs_path:
     return status;
 }
 
-static void
-ucs_topo_groups_cx9_filter(const ucs_topo_sys_device_info_t *devices,
-                           ucs_topo_groups_sys_dev_array_t *nics)
+static int ucs_topo_groups_is_nic_cx9(const ucs_topo_sys_device_info_t *device,
+                                      const char **reason_p)
 {
+    const ucs_sys_pci_id_t *pci_id = &device->pci_id;
+    const ucs_sys_bus_id_t *bus_id = &device->bus_id;
     char fw_ver[UCS_TOPO_GROUPS_FW_VER_MAX];
-    ucs_topo_sys_device_info_t const *device;
-    ucs_sys_pci_id_t const *pci_id;
-    ucs_sys_device_t *sys_dev;
     ucs_status_t status;
 
-    ucs_log_indent(1);
-
-    ucs_array_for_each(sys_dev, nics) {
-        device = &devices[*sys_dev];
-        pci_id = &device->pci_id;
-
-        ucs_log_indent(-1);
-
-        ucs_trace("cx9_filter: processing network device " UCS_SYS_BUS_ID_FMT,
-                  UCS_SYS_BUS_ID_ARG(&device->bus_id));
-
-        ucs_log_indent(1);
-
-        if (pci_id->vendor == UCS_TOPO_GROUPS_MELLANOX_VENDOR_ID) {
-            if (pci_id->device == UCS_TOPO_GROUPS_CX9_DEVICE_ID) {
-                ucs_trace("cx9 device found (device id)");
-                continue;
-            } else if (pci_id->device == UCS_TOPO_GROUPS_MLX5_VF_DEVICE_ID) {
-                ucs_trace("mlx5 VF device found");
-                status = ucs_topo_groups_read_ib_fw_ver(&device->bus_id, fw_ver,
-                                                        sizeof(fw_ver));
-                if (status == UCS_OK) {
-                    if (strncmp(fw_ver, "82.", 3) == 0) {
-                        ucs_trace("cx9 device found (firmware version)");
-                        continue;
-                    } else {
-                        ucs_trace("firmware version mismatch: %s", fw_ver);
-                    }
-                } else {
-                    ucs_trace("could not read firmware version (error: %s)",
-                              ucs_status_string(status));
-                }
-            }
-        }
-
-        ucs_trace("ignoring network device " UCS_SYS_BUS_ID_FMT
-                  " (pci id " UCS_SYS_PCI_ID_FMT ")",
-                  UCS_SYS_BUS_ID_ARG(&device->bus_id),
-                  UCS_SYS_PCI_ID_ARG(pci_id));
-        *sys_dev = UCS_SYS_DEVICE_ID_UNKNOWN;
+    if (pci_id->vendor != UCS_TOPO_GROUPS_MELLANOX_VENDOR_ID) {
+        *reason_p = "not a mellanox device";
+        return 0;
     }
 
-    ucs_log_indent(-1);
+    if (pci_id->device == UCS_TOPO_GROUPS_CX9_DEVICE_ID) {
+        *reason_p = "cx9 device by device id";
+        return 1;
+    }
 
-    ucs_topo_groups_sys_dev_compact(nics);
+    if (pci_id->device != UCS_TOPO_GROUPS_MLX5_VF_DEVICE_ID) {
+        *reason_p = "not a cx9 device by device id";
+        return 0;
+    }
+
+    /* PCI device ID is not indicative when the device is a VF, instead use
+     * the fact that fw version is 82.XX.XXXX for CX9 */
+    status = ucs_topo_groups_read_ib_fw_ver(bus_id, fw_ver, sizeof(fw_ver));
+    if (status != UCS_OK) {
+        ucs_debug("could not read firmware version (error: %s)",
+                  ucs_status_string(status));
+        *reason_p = "vf device, could not read firmware version";
+        return 0;
+    }
+
+    if (strncmp(fw_ver, "82.", 3) != 0) {
+        *reason_p = "vf device, firmware version mismatch";
+        return 0;
+    }
+
+    *reason_p = "cx9 device by firmware version";
+    return 1;
+}
+
+static void
+ucs_topo_groups_nics_cx9_filter(const ucs_topo_sys_device_info_t *devices,
+                                ucs_topo_groups_sys_dev_array_t *nics)
+{
+    size_t dst = 0;
+    const ucs_topo_sys_device_info_t *device;
+    ucs_sys_device_t sys_dev;
+    const char *reason;
+    size_t src;
+    int is_cx9;
+
+    if (ucs_array_is_empty(nics)) {
+        return;
+    }
+
+    ucs_assert(ucs_array_begin(nics) != NULL);
+
+    for (src = 0; src < ucs_array_length(nics); ++src) {
+        sys_dev = ucs_array_elem(nics, src);
+        device  = &devices[sys_dev];
+
+        /* TODO: Refactor to have this provided by UCT */
+        is_cx9 = ucs_topo_groups_is_nic_cx9(device, &reason);
+        if (is_cx9) {
+            ucs_array_elem(nics, dst++) = sys_dev;
+        }
+
+        ucs_debug("cx9_filter: network device sys_dev=%u, "
+                  "bus_id=" UCS_SYS_BUS_ID_FMT ", pci_id=" UCS_SYS_PCI_ID_FMT
+                  " %s (%s)",
+                  sys_dev, UCS_SYS_BUS_ID_ARG(&device->bus_id),
+                  UCS_SYS_PCI_ID_ARG(&device->pci_id),
+                  is_cx9 ? "added" : "skipped",
+                  reason);
+    }
+
+    ucs_array_set_length(nics, dst);
 }
 
 static ucs_status_t
@@ -257,98 +280,68 @@ ucs_topo_groups_devices_collect(const ucs_topo_sys_device_info_t *devices,
         }
 
         *ucs_array_append(target_array,
-                          ucs_error("failed to append device to target_array");
                           return UCS_ERR_NO_MEMORY) = (ucs_sys_device_t)i;
     }
 
     return UCS_OK;
 }
 
-static int ucs_topo_groups_bus_id_same_slot(const ucs_sys_bus_id_t *bus_id1,
-                                            const ucs_sys_bus_id_t *bus_id2)
+static ucs_status_t ucs_topo_groups_elements_build(
+        const ucs_topo_sys_device_info_t *devices,
+        const ucs_topo_groups_sys_dev_array_t *sys_devices,
+        int (*bus_id_match)(const ucs_sys_bus_id_t *bus_id1,
+                            const ucs_sys_bus_id_t *bus_id2),
+        ucs_topo_group_element_array_t *elements)
 {
-    return (bus_id1->domain == bus_id2->domain) &&
-           (bus_id1->bus == bus_id2->bus) && (bus_id1->slot == bus_id2->slot);
-}
-
-static int ucs_topo_groups_bus_id_equal(const ucs_sys_bus_id_t *bus_id1,
-                                        const ucs_sys_bus_id_t *bus_id2)
-{
-    return ucs_topo_groups_bus_id_same_slot(bus_id1, bus_id2) &&
-           (bus_id1->function == bus_id2->function);
-}
-
-static ucs_status_t
-ucs_topo_groups_gpus_build(const ucs_topo_sys_device_info_t *devices,
-                           const ucs_topo_groups_sys_dev_array_t *acc_devices,
-                           ucs_topo_gpu_array_t *gpus)
-{
-    const ucs_sys_bus_id_t *gpu_bus_id = NULL;
-    const ucs_sys_bus_id_t *dev_bus_id;
+    const ucs_sys_bus_id_t *bus_id, *prev_bus_id;
     const ucs_sys_device_t *sys_dev;
-    ucs_topo_gpu_t *gpu;
+    ucs_topo_group_element_t *element;
 
-    ucs_array_for_each(sys_dev, acc_devices) {
-        dev_bus_id = &devices[*sys_dev].bus_id;
+    if (ucs_array_is_empty(sys_devices)) {
+        return UCS_OK;
+    }
 
-        /* Start a new GPU if the bus ids differ. */
-        if ((gpu_bus_id == NULL) ||
-            !ucs_topo_groups_bus_id_equal(gpu_bus_id, dev_bus_id)) {
-            gpu = ucs_array_append(gpus,
-                                   ucs_error("failed to append to gpus array");
-                                   return UCS_ERR_NO_MEMORY);
-            memset(gpu, 0, sizeof(*gpu));
-            gpu_bus_id = dev_bus_id;
+    ucs_assert(ucs_array_begin(sys_devices) != NULL);
+
+    prev_bus_id = NULL;
+    ucs_array_for_each(sys_dev, sys_devices) {
+        bus_id = &devices[*sys_dev].bus_id;
+
+        if ((prev_bus_id == NULL) || !bus_id_match(prev_bus_id, bus_id)) {
+            /* No match, add a new element. */
+            element = ucs_array_append(elements, return UCS_ERR_NO_MEMORY);
+            memset(element, 0, sizeof(*element));
+            prev_bus_id = bus_id;
         }
 
-        if (gpu->num_devices >= UCS_TOPO_MAX_DEVICES_PER_GPU) {
-            ucs_error("too many accelerator devices (%zu) with bus "
-                      "id " UCS_SYS_BUS_ID_FMT,
-                      gpu->num_devices, UCS_SYS_BUS_ID_ARG(dev_bus_id));
+        if (element->num_sys_devs >= UCS_TOPO_MAX_SYS_DEVS_PER_ELEMENT) {
+            ucs_error("too many devices (%zu) with bus id " UCS_SYS_BUS_ID_FMT,
+                      element->num_sys_devs, UCS_SYS_BUS_ID_ARG(bus_id));
             return UCS_ERR_EXCEEDS_LIMIT;
         }
 
-        gpu->devices[gpu->num_devices++] = *sys_dev;
+        element->sys_devs[element->num_sys_devs++] = *sys_dev;
     }
 
     return UCS_OK;
 }
 
-static ucs_status_t
-ucs_topo_groups_nics_build(const ucs_topo_sys_device_info_t *devices,
-                           const ucs_topo_groups_sys_dev_array_t *net_devices,
-                           ucs_topo_nic_array_t *nics)
+static void ucs_topo_init_groups(ucs_topo_groups_t *groups)
 {
-    const ucs_sys_bus_id_t *nic_bus_id = NULL;
-    const ucs_sys_bus_id_t *dev_bus_id;
-    const ucs_sys_device_t *sys_dev;
-    ucs_topo_nic_t *nic;
+    ucs_array_init_dynamic(groups);
+}
 
-    ucs_array_for_each(sys_dev, net_devices) {
-        dev_bus_id = &devices[*sys_dev].bus_id;
+void ucs_topo_release_groups(ucs_topo_groups_t *groups)
+{
+    size_t i;
 
-        /* Start a new NIC if the bus ids differ (excluding the function). */
-        if ((nic_bus_id == NULL) ||
-            !ucs_topo_groups_bus_id_same_slot(nic_bus_id, dev_bus_id)) {
-            nic = ucs_array_append(nics,
-                                   ucs_error("failed to append to nics array");
-                                   return UCS_ERR_NO_MEMORY);
-            memset(nic, 0, sizeof(*nic));
-            nic_bus_id = dev_bus_id;
-        }
+    ucs_assert(groups != NULL);
 
-        if (nic->num_ports >= UCS_TOPO_MAX_PORTS_PER_NIC) {
-            ucs_error(
-                    "too many network devices (%zu) in pci slot %04x:%02x:%02x",
-                    nic->num_ports, (unsigned)dev_bus_id->domain,
-                    (unsigned)dev_bus_id->bus, (unsigned)dev_bus_id->slot);
-            return UCS_ERR_EXCEEDS_LIMIT;
-        }
-
-        nic->ports[nic->num_ports++] = *sys_dev;
+    for (i = 0; i < ucs_array_length(groups); ++i) {
+        ucs_topo_release_group(&ucs_array_elem(groups, i));
     }
 
-    return UCS_OK;
+    ucs_array_cleanup_dynamic(groups);
 }
 
 void ucs_topo_init_group(ucs_topo_group_t *group)
@@ -357,16 +350,16 @@ void ucs_topo_init_group(ucs_topo_group_t *group)
     ucs_array_init_dynamic(&group->nics);
 }
 
-static void ucs_topo_init_groups(ucs_topo_groups_t *groups)
+void ucs_topo_release_group(ucs_topo_group_t *group)
 {
-    groups->type = UCS_TOPO_GROUPS_TYPE_UNKNOWN;
-    ucs_array_init_dynamic(&groups->groups);
+    ucs_assert(group != NULL);
+    ucs_array_cleanup_dynamic(&group->nics);
+    ucs_array_cleanup_dynamic(&group->gpus);
 }
 
 static ucs_status_t
 ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
-                                unsigned num_devices,
-                                ucs_topo_groups_type_t type,
+                                unsigned num_devices, int is_vera_rubin,
                                 ucs_topo_group_t *inventory_p)
 {
     ucs_topo_groups_sys_dev_array_t acc_devices = UCS_ARRAY_DYNAMIC_INITIALIZER;
@@ -386,28 +379,33 @@ ucs_topo_groups_inventory_build(const ucs_topo_sys_device_info_t *devices,
     ucs_topo_groups_sys_dev_sort(&net_devices, devices);
 
     /* TODO: Remove this filter when NVML duplicates issue is fixed. */
-    ucs_topo_groups_gpu_aliases_filter(&acc_devices, devices);
+    ucs_topo_groups_gpu_aliases_filter(devices, &acc_devices);
 
-    if (type == UCS_TOPO_GROUPS_TYPE_VERA_RUBIN) {
-        ucs_topo_groups_cx9_filter(devices, &net_devices);
+    if (is_vera_rubin) {
+        ucs_topo_groups_nics_cx9_filter(devices, &net_devices);
     }
 
-    status = ucs_topo_groups_gpus_build(devices, &acc_devices, &inventory.gpus);
+    /* Accelerator devices (GPUs) are grouped by full bus id equality. */
+    status = ucs_topo_groups_elements_build(devices, &acc_devices,
+                                            ucs_topo_groups_bus_id_equal,
+                                            &inventory.gpus);
     if (status != UCS_OK) {
         goto err_free_arrays;
     }
 
-    status = ucs_topo_groups_nics_build(devices, &net_devices, &inventory.nics);
+    /* Network devices (NICs) are grouped by bdf equality excl. the function. */
+    status = ucs_topo_groups_elements_build(devices, &net_devices,
+                                            ucs_topo_groups_bus_id_same_slot,
+                                            &inventory.nics);
     if (status != UCS_OK) {
         goto err_free_arrays;
     }
 
     ucs_debug("built inventory with %zu physical gpus (%zu devices) and %zu "
               "physical nics (%zu devices)",
-              (size_t)ucs_array_length(&inventory.gpus),
-              (size_t)ucs_array_length(&acc_devices),
-              (size_t)ucs_array_length(&inventory.nics),
-              (size_t)ucs_array_length(&net_devices));
+              ucs_array_length(&inventory.gpus), ucs_array_length(&acc_devices),
+              ucs_array_length(&inventory.nics),
+              ucs_array_length(&net_devices));
 
     ucs_array_cleanup_dynamic(&net_devices);
     ucs_array_cleanup_dynamic(&acc_devices);
@@ -434,7 +432,7 @@ ucs_topo_groups_get_or_add_group(ucs_numa_node_t numa_node,
     /* Check if the group already exists for the given NUMA node. */
     for (i = 0; i < ucs_array_length(numa_nodes); ++i) {
         if (ucs_array_elem(numa_nodes, i) == numa_node) {
-            *group_p = &ucs_array_elem(&groups->groups, i);
+            *group_p = &ucs_array_elem(groups, i);
             return UCS_OK;
         }
     }
@@ -443,7 +441,7 @@ ucs_topo_groups_get_or_add_group(ucs_numa_node_t numa_node,
                       ucs_error("failed to append to numa nodes array");
                       return UCS_ERR_NO_MEMORY) = numa_node;
 
-    group = ucs_array_append(&groups->groups,
+    group = ucs_array_append(groups,
                              ucs_error("failed to append to groups array");
                              return UCS_ERR_NO_MEMORY);
     ucs_topo_init_group(group);
@@ -454,23 +452,19 @@ ucs_topo_groups_get_or_add_group(ucs_numa_node_t numa_node,
 
 static ucs_status_t ucs_topo_groups_build_groups_by_numa_node(
         const ucs_topo_sys_device_info_t *devices,
-        const ucs_topo_group_t *inventory, ucs_topo_groups_type_t groups_type,
-        ucs_topo_groups_t *groups)
+        const ucs_topo_group_t *inventory, ucs_topo_groups_t *groups)
 {
     ucs_topo_groups_numa_node_array_t numa_nodes = UCS_ARRAY_DYNAMIC_INITIALIZER;
-    const ucs_topo_gpu_t *gpu;
-    const ucs_topo_nic_t *nic;
+    const ucs_topo_group_element_t *element;
     ucs_topo_group_t *group;
     ucs_numa_node_t numa_node;
     ucs_status_t status;
 
-    groups->type = groups_type;
-
-    ucs_array_for_each(gpu, &inventory->gpus) {
-        numa_node = devices[gpu->devices[0]].numa_node;
+    ucs_array_for_each(element, &inventory->gpus) {
+        numa_node = devices[element->sys_devs[0]].numa_node;
         if (numa_node == UCS_NUMA_NODE_UNDEFINED) {
             ucs_error("system device %u has undefined numa node",
-                      gpu->devices[0]);
+                      element->sys_devs[0]);
             status = UCS_ERR_NO_ELEM;
             goto out_cleanup_numa_nodes;
         }
@@ -485,14 +479,14 @@ static ucs_status_t ucs_topo_groups_build_groups_by_numa_node(
             ucs_error("failed to append to group gpus array");
             status = UCS_ERR_NO_MEMORY;
             goto out_cleanup_numa_nodes;
-        }) = *gpu;
+        }) = *element;
     }
 
-    ucs_array_for_each(nic, &inventory->nics) {
-        numa_node = devices[nic->ports[0]].numa_node;
+    ucs_array_for_each(element, &inventory->nics) {
+        numa_node = devices[element->sys_devs[0]].numa_node;
         if (numa_node == UCS_NUMA_NODE_UNDEFINED) {
             ucs_error("system device %u has undefined numa node",
-                      nic->ports[0]);
+                      element->sys_devs[0]);
             status = UCS_ERR_NO_ELEM;
             goto out_cleanup_numa_nodes;
         }
@@ -507,7 +501,7 @@ static ucs_status_t ucs_topo_groups_build_groups_by_numa_node(
             ucs_error("failed to append to group nics array");
             status = UCS_ERR_NO_MEMORY;
             goto out_cleanup_numa_nodes;
-        }) = *nic;
+        }) = *element;
     }
 
     status = UCS_OK;
@@ -515,18 +509,6 @@ static ucs_status_t ucs_topo_groups_build_groups_by_numa_node(
 out_cleanup_numa_nodes:
     ucs_array_cleanup_dynamic(&numa_nodes);
     return status;
-}
-
-static const char *ucs_topo_groups_type_str(ucs_topo_groups_type_t type)
-{
-    switch (type) {
-    case UCS_TOPO_GROUPS_TYPE_UNKNOWN:
-        return "unknown";
-    case UCS_TOPO_GROUPS_TYPE_VERA_RUBIN:
-        return "vera-rubin";
-    default:
-        return "<invalid>";
-    }
 }
 
 static void
@@ -551,34 +533,21 @@ ucs_topo_groups_append_device_names(const ucs_topo_sys_device_info_t *devices,
     }
 }
 
-static void
-ucs_topo_groups_format_group(const ucs_topo_sys_device_info_t *devices,
-                             const ucs_topo_group_t *group,
-                             ucs_string_buffer_t *gpus_strb,
-                             ucs_string_buffer_t *nics_strb)
+static void ucs_topo_groups_format_elements(
+        const ucs_topo_sys_device_info_t *devices,
+        const ucs_topo_group_element_array_t *elements,
+        ucs_string_buffer_t *strb)
 {
-    const ucs_topo_gpu_t *gpu;
-    const ucs_topo_nic_t *nic;
-    size_t i;
+    const ucs_topo_group_element_t *element;
+    size_t i = 0;
 
-    i = 0;
-    ucs_array_for_each(gpu, &group->gpus) {
+    ucs_array_for_each(element, elements) {
         if (i++ > 0) {
-            ucs_string_buffer_appendf(gpus_strb, " ");
+            ucs_string_buffer_appendf(strb, " ");
         }
 
-        ucs_topo_groups_append_device_names(devices, gpu->devices,
-                                            gpu->num_devices, gpus_strb);
-    }
-
-    i = 0;
-    ucs_array_for_each(nic, &group->nics) {
-        if (i++ > 0) {
-            ucs_string_buffer_appendf(nics_strb, " ");
-        }
-
-        ucs_topo_groups_append_device_names(devices, nic->ports, nic->num_ports,
-                                            nics_strb);
+        ucs_topo_groups_append_device_names(devices, element->sys_devs,
+                                            element->num_sys_devs, strb);
     }
 }
 
@@ -600,22 +569,17 @@ static void ucs_topo_groups_log(const ucs_topo_sys_device_info_t *devices,
     ucs_table_init(&table, &table_config);
 
     ucs_table_add_row(&table, &row);
-    ucs_table_row_add_cell_fmt(&table, row, table_config.n_cols,
-                               UCS_TABLE_ALIGN_LEFT, "Topology groups type: %s",
-                               ucs_topo_groups_type_str(groups->type));
-    ucs_table_add_separator(&table);
-
-    ucs_table_add_row(&table, &row);
     ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "Group #");
     ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "GPUs");
     ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_LEFT, "NICs");
     ucs_table_add_separator(&table);
 
     group_idx = 0;
-    ucs_array_for_each(group, &groups->groups) {
+    ucs_array_for_each(group, groups) {
         ucs_string_buffer_reset(&gpus_strb);
         ucs_string_buffer_reset(&nics_strb);
-        ucs_topo_groups_format_group(devices, group, &gpus_strb, &nics_strb);
+        ucs_topo_groups_format_elements(devices, &group->gpus, &gpus_strb);
+        ucs_topo_groups_format_elements(devices, &group->nics, &nics_strb);
 
         ucs_table_add_row(&table, &row);
         ucs_table_row_add_cell_fmt(&table, row, 1, UCS_TABLE_ALIGN_RIGHT, "%zu",
@@ -643,9 +607,7 @@ static void ucs_topo_groups_log(const ucs_topo_sys_device_info_t *devices,
 
 ucs_status_t
 ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
-                            unsigned num_devices,
-                            ucs_topo_groups_type_t groups_type,
-                            ucs_topo_groups_t *groups_p)
+                            unsigned num_devices, ucs_topo_groups_t *groups_p)
 {
     ucs_topo_group_t inventory;
     ucs_topo_groups_t groups;
@@ -653,21 +615,14 @@ ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
 
     ucs_topo_init_groups(&groups);
 
-    if (groups_type == UCS_TOPO_GROUPS_TYPE_UNKNOWN) {
-        goto out;
-    }
-    
-    /* Currently only Vera Rubin is supported. */
-    ucs_assert(groups_type == UCS_TOPO_GROUPS_TYPE_VERA_RUBIN);
-
-    status = ucs_topo_groups_inventory_build(devices, num_devices, groups_type,
+    status = ucs_topo_groups_inventory_build(devices, num_devices, 1,
                                              &inventory);
     if (status != UCS_OK) {
         return status;
     }
 
     status = ucs_topo_groups_build_groups_by_numa_node(devices, &inventory,
-                                                       groups_type, &groups);
+                                                       &groups);
     if (status != UCS_OK) {
         goto err_cleanup_groups;
     }
@@ -680,10 +635,8 @@ ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
 
     ucs_topo_release_group(&inventory);
 
-out:
-    ucs_debug("initialized topo groups of type %s with %zu groups",
-              ucs_topo_groups_type_str(groups.type),
-              ucs_array_length(&groups.groups));
+    ucs_debug("initialized topo groups with %zu groups",
+              ucs_array_length(&groups));
 
     *groups_p = groups;
     return UCS_OK;

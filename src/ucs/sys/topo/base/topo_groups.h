@@ -12,8 +12,7 @@
 
 BEGIN_C_DECLS
 
-#define UCS_TOPO_MAX_PORTS_PER_NIC   2
-#define UCS_TOPO_MAX_DEVICES_PER_GPU 2
+#define UCS_TOPO_MAX_SYS_DEVS_PER_ELEMENT 8
 
 /* CX-9 PCI identifiers */
 #define UCS_TOPO_GROUPS_MELLANOX_VENDOR_ID 0x15b3
@@ -23,36 +22,16 @@ BEGIN_C_DECLS
 
 /**
  * @ingroup UCS_RESOURCE
- * Type of system topology represented by topology groups.
- */
-typedef enum {
-    UCS_TOPO_GROUPS_TYPE_UNKNOWN,
-    UCS_TOPO_GROUPS_TYPE_VERA_RUBIN
-} ucs_topo_groups_type_t;
-
-
-/**
- * @ingroup UCS_RESOURCE
- * Physical GPU represented in a topology group.
+ * Physical device represented in a topology group.
  */
 typedef struct {
-    ucs_sys_device_t devices[UCS_TOPO_MAX_DEVICES_PER_GPU];
-    size_t           num_devices;
-} ucs_topo_gpu_t;
+    ucs_sys_device_t sys_devs[UCS_TOPO_MAX_SYS_DEVS_PER_ELEMENT];
+    size_t           num_sys_devs;
+} ucs_topo_group_element_t;
 
 
-/**
- * @ingroup UCS_RESOURCE
- * Physical NIC represented in a topology group.
- */
-typedef struct {
-    ucs_sys_device_t ports[UCS_TOPO_MAX_PORTS_PER_NIC];
-    size_t           num_ports;
-} ucs_topo_nic_t;
-
-
-UCS_ARRAY_DECLARE_TYPE(ucs_topo_gpu_array_t, size_t, ucs_topo_gpu_t);
-UCS_ARRAY_DECLARE_TYPE(ucs_topo_nic_array_t, size_t, ucs_topo_nic_t);
+UCS_ARRAY_DECLARE_TYPE(ucs_topo_group_element_array_t, size_t,
+                       ucs_topo_group_element_t);
 
 
 /**
@@ -60,8 +39,8 @@ UCS_ARRAY_DECLARE_TYPE(ucs_topo_nic_array_t, size_t, ucs_topo_nic_t);
  * Group of GPUs and NICs sharing a topology locality.
  */
 typedef struct {
-    ucs_topo_gpu_array_t gpus;
-    ucs_topo_nic_array_t nics;
+    ucs_topo_group_element_array_t gpus;
+    ucs_topo_group_element_array_t nics;
 } ucs_topo_group_t;
 
 UCS_ARRAY_DECLARE_TYPE(ucs_topo_group_array_t, size_t, ucs_topo_group_t);
@@ -70,10 +49,7 @@ UCS_ARRAY_DECLARE_TYPE(ucs_topo_group_array_t, size_t, ucs_topo_group_t);
  * @ingroup UCS_RESOURCE
  * Collection of system topology groups.
  */
-typedef struct {
-    ucs_topo_groups_type_t type;
-    ucs_topo_group_array_t groups;
-} ucs_topo_groups_t;
+typedef ucs_topo_group_array_t ucs_topo_groups_t;
 
 
 /**
@@ -119,7 +95,6 @@ void ucs_topo_release_group(ucs_topo_group_t *group);
  *
  * @param [in]  devices      Array of registered system devices.
  * @param [in]  num_devices  Number of elements in @a devices.
- * @param [in]  groups_type  Type of topology groups to build.
  * @param [out] groups_p     Initialized topology groups.
  *
  * @return UCS_OK on success, or an error status if topology group
@@ -127,9 +102,7 @@ void ucs_topo_release_group(ucs_topo_group_t *group);
  */
 ucs_status_t
 ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
-                            unsigned num_devices,
-                            ucs_topo_groups_type_t groups_type,
-                            ucs_topo_groups_t *groups_p);
+                            unsigned num_devices, ucs_topo_groups_t *groups_p);
 
 END_C_DECLS
 
