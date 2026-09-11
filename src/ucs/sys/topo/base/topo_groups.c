@@ -24,10 +24,7 @@
 #include <string.h>
 
 
-#define UCS_TOPO_GROUPS_MELLANOX_VENDOR_ID 0x15b3
-#define UCS_TOPO_GROUPS_CX9_DEVICE_ID      0x1025
-#define UCS_TOPO_GROUPS_MLX5_VF_DEVICE_ID  0x101e
-#define UCS_TOPO_GROUPS_FW_VER_MAX         64
+#define UCS_TOPO_GROUPS_FW_VER_MAX 64
 
 
 UCS_ARRAY_DECLARE_TYPE(ucs_topo_groups_sys_dev_array_t, size_t,
@@ -447,63 +444,61 @@ static ucs_status_t ucs_topo_groups_get_or_add_group_by_numa_node(
     return UCS_OK;
 }
 
-static ucs_status_t ucs_topo_groups_build_groups_by_numa_node(
+static ucs_status_t ucs_topo_groups_add_elements_by_numa_node(
         const ucs_topo_sys_device_info_t *devices,
-        const ucs_topo_group_t *inventory, ucs_topo_groups_t *groups)
+        const ucs_topo_group_element_array_t *elements,
+        ucs_topo_groups_numa_node_array_t *numa_nodes,
+        size_t group_elements_offset, ucs_topo_groups_t *groups)
 {
-    ucs_topo_groups_numa_node_array_t numa_nodes = UCS_ARRAY_DYNAMIC_INITIALIZER;
+    ucs_topo_group_element_array_t *group_elements;
     const ucs_topo_group_element_t *element;
     ucs_topo_group_t *group;
     ucs_numa_node_t numa_node;
     ucs_status_t status;
 
-    ucs_array_for_each(element, &inventory->gpus) {
+    ucs_array_for_each(element, elements) {
         numa_node = devices[element->sys_devs[0]].numa_node;
         if (numa_node == UCS_NUMA_NODE_UNDEFINED) {
-            ucs_error("system device %u has undefined numa node",
+            ucs_debug("skipping topology element for system device %u with "
+                      "undefined numa node",
                       element->sys_devs[0]);
-            status = UCS_ERR_NO_ELEM;
-            goto out_cleanup_numa_nodes;
+            continue;
         }
 
         status = ucs_topo_groups_get_or_add_group_by_numa_node(numa_node,
-                                                               &numa_nodes,
+                                                               numa_nodes,
                                                                groups, &group);
         if (status != UCS_OK) {
-            goto out_cleanup_numa_nodes;
+            return status;
         }
 
-        *ucs_array_append(&group->gpus, {
-            ucs_error("failed to append to group gpus array");
-            status = UCS_ERR_NO_MEMORY;
-            goto out_cleanup_numa_nodes;
-        }) = *element;
+        group_elements = UCS_PTR_BYTE_OFFSET(group, group_elements_offset);
+        *ucs_array_append(group_elements,
+                          ucs_error("failed to append to group elements array");
+                          return UCS_ERR_NO_MEMORY) = *element;
     }
 
-    ucs_array_for_each(element, &inventory->nics) {
-        numa_node = devices[element->sys_devs[0]].numa_node;
-        if (numa_node == UCS_NUMA_NODE_UNDEFINED) {
-            ucs_error("system device %u has undefined numa node",
-                      element->sys_devs[0]);
-            status = UCS_ERR_NO_ELEM;
-            goto out_cleanup_numa_nodes;
-        }
+    return UCS_OK;
+}
 
-        status = ucs_topo_groups_get_or_add_group_by_numa_node(numa_node,
-                                                               &numa_nodes,
-                                                               groups, &group);
-        if (status != UCS_OK) {
-            goto out_cleanup_numa_nodes;
-        }
+static ucs_status_t
+ucs_topo_groups_build_groups(const ucs_topo_sys_device_info_t *devices,
+                             const ucs_topo_group_t *inventory,
+                             ucs_topo_groups_t *groups)
+{
+    ucs_topo_groups_numa_node_array_t numa_nodes = UCS_ARRAY_DYNAMIC_INITIALIZER;
+    ucs_status_t status;
 
-        *ucs_array_append(&group->nics, {
-            ucs_error("failed to append to group nics array");
-            status = UCS_ERR_NO_MEMORY;
-            goto out_cleanup_numa_nodes;
-        }) = *element;
+    status = ucs_topo_groups_add_elements_by_numa_node(
+            devices, &inventory->gpus, &numa_nodes,
+            ucs_offsetof(ucs_topo_group_t, gpus), groups);
+    if (status != UCS_OK) {
+        goto out_cleanup_numa_nodes;
     }
 
-    status = UCS_OK;
+    status = ucs_topo_groups_add_elements_by_numa_node(
+            devices, &inventory->nics, &numa_nodes,
+            ucs_offsetof(ucs_topo_group_t, nics), groups);
 
 out_cleanup_numa_nodes:
     ucs_array_cleanup_dynamic(&numa_nodes);
@@ -620,8 +615,7 @@ ucs_topo_build_groups_inner(const ucs_topo_sys_device_info_t *devices,
         return status;
     }
 
-    status = ucs_topo_groups_build_groups_by_numa_node(devices, &inventory,
-                                                       &groups);
+    status = ucs_topo_groups_build_groups(devices, &inventory, &groups);
     if (status != UCS_OK) {
         goto err_cleanup_groups;
     }
