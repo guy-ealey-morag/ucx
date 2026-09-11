@@ -169,8 +169,8 @@ ucp_gpu_nic_assignment_allocate_bitmaps(ucp_gpu_nic_assignment_t *assignment,
     }
 
     if (num_bitmaps > UCP_GPU_NIC_BITMAP_INDEX_INVALID) {
-        ucs_error("gpu-nic sys_dev bitmap count exceeds limit %u",
-                  (unsigned)UCP_GPU_NIC_BITMAP_INDEX_INVALID);
+        ucs_error("gpu-nic sys_dev bitmap count %zu exceeds limit %u",
+                  num_bitmaps, (unsigned)UCP_GPU_NIC_BITMAP_INDEX_INVALID);
         return UCS_ERR_EXCEEDS_LIMIT;
     }
 
@@ -292,7 +292,7 @@ ucp_gpu_nic_assignment_build(const ucs_topo_groups_t *groups,
 
     status = ucp_gpu_nic_assignment_init(&assignment, groups);
     if (status != UCS_OK) {
-        goto err_cleanup_sys_dev_bitmaps;
+        return status;
     }
 
     ucs_array_for_each_index(group, group_idx, groups) {
@@ -308,10 +308,6 @@ ucp_gpu_nic_assignment_build(const ucs_topo_groups_t *groups,
     *assignment_p = assignment;
 
     return UCS_OK;
-
-err_cleanup_sys_dev_bitmaps:
-    ucs_free(assignment.nic_sys_dev_bitmaps);
-    return status;
 }
 
 int ucp_gpu_nic_bitmap_get(const ucp_gpu_nic_sys_dev_bitmap_t *bitmap,
