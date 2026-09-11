@@ -18,6 +18,7 @@
 #include <ucs/algorithm/qsort_r.h>
 #include <ucs/algorithm/crc.h>
 #include <ucs/arch/atomic.h>
+#include <ucs/arch/cpu.h>
 #include <ucs/datastruct/mpool.inl>
 #include <ucs/datastruct/queue.h>
 #include <ucs/datastruct/string_set.h>
@@ -2761,6 +2762,11 @@ static ucs_status_t ucp_context_gpu_nic_assignment_init(ucp_context_h context)
     ucp_gpu_nic_assignment_t *assignment;
     ucs_topo_groups_t groups;
     ucs_status_t status;
+
+    if (ucs_arch_get_cpu_model() != UCS_CPU_MODEL_NVIDIA_VERA) {
+        ucs_debug("gpu-nic assignment is not supported on %s architecture", ucs_cpu_model_name());
+        return UCS_OK;
+    }
 
     status = ucs_topo_build_groups(&groups);
     if (status != UCS_OK) {
