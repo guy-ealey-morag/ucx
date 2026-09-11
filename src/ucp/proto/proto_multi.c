@@ -499,8 +499,8 @@ static ucs_status_t ucp_proto_multi_filter_gpu_nic_lanes(
         lane_sys_dev = ucp_proto_common_get_sys_dev(&params->super.super, lane);
 
         /* Keep only lanes whose local transport function is assigned. */
-        if (!ucp_gpu_nic_bitmap_test(params->assigned_nic_bitmap,
-                                     lane_sys_dev)) {
+        if (!ucp_gpu_nic_bitmap_get(params->assigned_nic_bitmap,
+                                    lane_sys_dev)) {
             ucs_trace("assignment removes lane %d on network sys_dev %d", lane,
                       lane_sys_dev);
             continue;

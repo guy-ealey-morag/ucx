@@ -1396,29 +1396,28 @@ static void test_ucp_proto_mock_build_gpu_nic_assignment(
 {
     ucs_topo_groups_t groups;
     ucs_topo_group_t *group;
-    ucs_topo_gpu_t *gpu;
-    ucs_topo_nic_t *nic;
+    ucs_topo_group_element_t *gpu;
+    ucs_topo_group_element_t *nic;
     ucp_gpu_nic_assignment_t *assignment;
     ucs_status_t status;
 
-    groups.type = UCS_TOPO_GROUPS_TYPE_CLIQUE;
-    ucs_array_init_dynamic(&groups.groups);
-    group = ucs_array_append(&groups.groups,
+    ucs_array_init_dynamic(&groups);
+    group = ucs_array_append(&groups,
                              FAIL() << "failed to append topology group");
     ucs_topo_init_group(group);
 
     gpu = ucs_array_append(&group->gpus,
                            FAIL() << "failed to append topology GPU");
     memset(gpu, 0, sizeof(*gpu));
-    gpu->devices[0]  = gpu_sys_dev;
-    gpu->num_devices = 1;
+    gpu->sys_devs[0]  = gpu_sys_dev;
+    gpu->num_sys_devs = 1;
 
     for (auto nic_sys_dev : assigned_nics) {
         nic = ucs_array_append(&group->nics,
                                FAIL() << "failed to append topology NIC");
         memset(nic, 0, sizeof(*nic));
-        nic->ports[0]  = nic_sys_dev;
-        nic->num_ports = 1;
+        nic->sys_devs[0]  = nic_sys_dev;
+        nic->num_sys_devs = 1;
     }
 
     assignment = static_cast<ucp_gpu_nic_assignment_t*>(
