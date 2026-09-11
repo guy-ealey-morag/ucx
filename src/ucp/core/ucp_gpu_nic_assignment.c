@@ -42,14 +42,14 @@ ucp_gpu_nic_assignment_get_gpu_idx(ucp_gpu_nic_assignment_policy_t policy,
 
 static void
 ucp_gpu_nic_bitmap_add_nic(ucp_gpu_nic_sys_dev_bitmap_t *nic_sys_dev_bitmap,
-                           const ucs_topo_nic_t *nic)
+                           const ucs_topo_group_element_t *nic)
 {
     const ucs_sys_device_t *port;
 
-    ucs_assert((nic->num_ports > 0) &&
-               (nic->num_ports <= UCS_TOPO_MAX_PORTS_PER_NIC));
+    ucs_assert((nic->num_sys_devs > 0) &&
+               (nic->num_sys_devs <= UCS_TOPO_MAX_SYS_DEVS_PER_ELEMENT));
 
-    ucs_carray_for_each(port, nic->ports, nic->num_ports) {
+    ucs_carray_for_each(port, nic->sys_devs, nic->num_sys_devs) {
         ucs_assert(*port != UCS_SYS_DEVICE_ID_UNKNOWN);
         UCS_STATIC_BITMAP_SET(nic_sys_dev_bitmap, *port);
     }
@@ -69,7 +69,7 @@ ucp_gpu_nic_assignment_log_group(const ucp_gpu_nic_assignment_t *assignment,
     size_t num_gpus          = ucs_array_length(&group->gpus);
     size_t num_nics          = ucs_array_length(&group->nics);
     const ucp_gpu_nic_sys_dev_bitmap_t *nic_sys_dev_bitmap;
-    const ucs_topo_nic_t *nic;
+    const ucs_topo_group_element_t *nic;
     size_t nic_idx;
     size_t gpu_idx;
     int has_owner;
@@ -92,7 +92,8 @@ ucp_gpu_nic_assignment_log_group(const ucp_gpu_nic_assignment_t *assignment,
         for (gpu_idx = 0; gpu_idx < num_gpus; ++gpu_idx) {
             nic_sys_dev_bitmap =
                     &assignment->nic_sys_dev_bitmaps[base_bitmap_idx + gpu_idx];
-            if (!ucp_gpu_nic_bitmap_test(nic_sys_dev_bitmap, nic->ports[0])) {
+            if (!ucp_gpu_nic_bitmap_test(nic_sys_dev_bitmap,
+                                         nic->sys_devs[0])) {
                 continue;
             }
 
@@ -128,7 +129,7 @@ ucp_gpu_nic_assignment_allocate_bitmaps(ucp_gpu_nic_assignment_t *assignment,
     size_t num_bitmaps = 0;
     const ucs_topo_group_t *group;
 
-    ucs_array_for_each(group, &groups->groups) {
+    ucs_array_for_each(group, groups) {
         num_bitmaps += ucs_array_length(&group->gpus);
     }
 
@@ -155,7 +156,7 @@ ucp_gpu_nic_assignment_allocate_bitmaps(ucp_gpu_nic_assignment_t *assignment,
 }
 
 static void ucp_gpu_nic_assignment_map_gpu(ucp_gpu_nic_assignment_t *assignment,
-                                           const ucs_topo_gpu_t *gpu,
+                                           const ucs_topo_group_element_t *gpu,
                                            size_t nic_sys_dev_bitmap_idx)
 {
     const ucs_sys_device_t *gpu_sys_dev;
@@ -163,7 +164,7 @@ static void ucp_gpu_nic_assignment_map_gpu(ucp_gpu_nic_assignment_t *assignment,
     ucs_assert(nic_sys_dev_bitmap_idx < UCP_GPU_NIC_BITMAP_INDEX_INVALID);
 
     /* Assign the same bitmap to all devices under the same GPU. */
-    ucs_carray_for_each(gpu_sys_dev, gpu->devices, gpu->num_devices) {
+    ucs_carray_for_each(gpu_sys_dev, gpu->sys_devs, gpu->num_sys_devs) {
         ucs_assert(*gpu_sys_dev != UCS_SYS_DEVICE_ID_UNKNOWN);
         ucs_assert(assignment->bitmap_idx_by_gpu_sys_dev[*gpu_sys_dev] ==
                    UCP_GPU_NIC_BITMAP_INDEX_INVALID);
@@ -182,8 +183,8 @@ ucp_gpu_nic_assignment_add_group(ucp_gpu_nic_assignment_t *assignment,
     size_t num_gpus = ucs_array_length(&group->gpus);
     size_t nic_idx  = 0;
     ucp_gpu_nic_sys_dev_bitmap_t *nic_sys_dev_bitmap;
-    const ucs_topo_nic_t *nic;
-    const ucs_topo_gpu_t *gpu;
+    const ucs_topo_group_element_t *nic;
+    const ucs_topo_group_element_t *gpu;
     size_t gpu_idx;
     size_t bitmap_idx;
 
@@ -202,8 +203,9 @@ ucp_gpu_nic_assignment_add_group(ucp_gpu_nic_assignment_t *assignment,
 
         bitmap_idx         = base_bitmap_idx + gpu_idx;
         nic_sys_dev_bitmap = &assignment->nic_sys_dev_bitmaps[bitmap_idx];
-        ucs_assert((gpu->num_devices > 0) &&
-                   (gpu->num_devices <= UCS_TOPO_MAX_DEVICES_PER_GPU));
+        ucs_assert((gpu->num_sys_devs > 0) &&
+                   (gpu->num_sys_devs <=
+                    UCS_TOPO_MAX_SYS_DEVS_PER_ELEMENT));
 
         if (UCS_STATIC_BITMAP_IS_ZERO(*nic_sys_dev_bitmap)) {
             ucs_debug("gpu #%zu in group #%zu has no assigned nics", gpu_idx,
@@ -238,9 +240,8 @@ ucp_gpu_nic_assignment_build(const ucs_topo_groups_t *groups,
         goto err_cleanup_sys_dev_bitmaps;
     }
 
-    for (group_idx = 0; group_idx < ucs_array_length(&groups->groups);
-         ++group_idx) {
-        group = &ucs_array_elem(&groups->groups, group_idx);
+    for (group_idx = 0; group_idx < ucs_array_length(groups); ++group_idx) {
+        group = &ucs_array_elem(groups, group_idx);
 
         if (ucs_array_is_empty(&group->gpus)) {
             ucs_debug("group #%zu has 0 GPUs, skipping", group_idx);
