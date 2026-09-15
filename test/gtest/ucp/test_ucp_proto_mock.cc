@@ -63,11 +63,11 @@ public:
             bool use_real_sys_device = false,
             iface_attr_v2_func_t v2_cb = [](uct_iface_attr_v2_t &iface_attr) {})
     {
-        m_iface_attrs_funcs[dev_name]   = std::move(cb);
+        m_iface_attrs_funcs[dev_name]    = std::move(cb);
         m_iface_attrs_v2_funcs[dev_name] = std::move(v2_cb);
-        m_perf_attrs_funcs[dev_name]    = std::move(perf_cb);
-        m_sys_devices[dev_name]         = sys_device;
-        m_use_real_sys_device[dev_name] = use_real_sys_device;
+        m_perf_attrs_funcs[dev_name]     = std::move(perf_cb);
+        m_sys_devices[dev_name]          = sys_device;
+        m_use_real_sys_device[dev_name]  = use_real_sys_device;
     }
 
     void add_mock_iface_on_sys_device(
