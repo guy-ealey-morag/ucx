@@ -455,6 +455,7 @@ ucs_topo_groups_append_device_names(const ucs_topo_sys_device_info_t *devices,
                                     size_t num_devices,
                                     ucs_string_buffer_t *strb)
 {
+    const char *name;
     size_t i;
 
     if (num_devices > 1) {
@@ -462,8 +463,11 @@ ucs_topo_groups_append_device_names(const ucs_topo_sys_device_info_t *devices,
     }
 
     for (i = 0; i < num_devices; ++i) {
+        name = (devices == NULL) ?
+                       ucs_topo_sys_device_get_name(sys_devs[i]) :
+                       devices[sys_devs[i]].name;
         ucs_string_buffer_appendf(strb, "%s%s", (i == 0) ? "" : ";",
-                                  devices[sys_devs[i]].name);
+                                  name);
     }
 
     if (num_devices > 1) {
@@ -491,10 +495,12 @@ ucs_topo_groups_format_elements(const ucs_topo_sys_device_info_t *devices,
 
 ucs_status_t ucs_topo_groups_render(const ucs_topo_sys_device_info_t *devices,
                                     const ucs_topo_groups_t *groups,
+                                    const char *row_prefix,
                                     ucs_string_buffer_t *strb)
 {
     const ucs_table_config_t table_config = {
-        .n_cols = 3
+        .n_cols     = 3,
+        .row_prefix = row_prefix
     };
     ucs_string_buffer_t gpus_strb         = UCS_STRING_BUFFER_INITIALIZER;
     ucs_string_buffer_t nics_strb         = UCS_STRING_BUFFER_INITIALIZER;
@@ -549,7 +555,7 @@ static void ucs_topo_groups_log(const ucs_topo_sys_device_info_t *devices,
     ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
     ucs_status_t status;
 
-    status = ucs_topo_groups_render(devices, groups, &strb);
+    status = ucs_topo_groups_render(devices, groups, NULL, &strb);
     if (status != UCS_OK) {
         ucs_warn("topology groups table render incomplete: %s",
                  ucs_status_string(status));

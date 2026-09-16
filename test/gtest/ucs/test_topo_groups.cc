@@ -213,12 +213,13 @@ protected:
                                            &m_groups);
     }
 
-    std::string render()
+    std::string render(const char *row_prefix = NULL)
     {
         ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
         ucs_status_t status;
 
-        status = ucs_topo_groups_render(m_devices.data(), &m_groups, &strb);
+        status = ucs_topo_groups_render(m_devices.data(), &m_groups, row_prefix,
+                                        &strb);
         EXPECT_EQ(UCS_OK, status);
 
         std::string out(ucs_string_buffer_cstr(&strb));
@@ -396,4 +397,15 @@ UCS_TEST_F(test_topo_groups, table_empty) {
               "| <empty>               |\n"
               "+---------+------+------+",
               render());
+}
+
+UCS_TEST_F(test_topo_groups, table_row_prefix) {
+    ASSERT_UCS_OK(build());
+
+    EXPECT_EQ("# +---------+------+------+\n"
+              "# | Group # | GPUs | NICs |\n"
+              "# +---------+------+------+\n"
+              "# | <empty>               |\n"
+              "# +---------+------+------+",
+              render("# "));
 }

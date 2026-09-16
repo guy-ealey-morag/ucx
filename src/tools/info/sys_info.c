@@ -17,6 +17,7 @@
 #include <ucs/debug/log.h>
 #include <ucs/sys/sys.h>
 #include <ucs/sys/math.h>
+#include <ucs/sys/topo/base/topo_groups.h>
 #include <ucs/time/time.h>
 #include <ucs/config/parser.h>
 #include <ucs/config/global_opts.h>
@@ -197,12 +198,42 @@ static void print_sys_topo_memory_latency(unsigned num_devices)
     ucs_table_cleanup(&table);
 }
 
+static void print_sys_topo_groups()
+{
+    ucs_string_buffer_t strb = UCS_STRING_BUFFER_INITIALIZER;
+    ucs_topo_groups_t groups;
+    ucs_status_t status;
+
+    status = ucs_topo_build_groups(&groups);
+    if (status == UCS_ERR_UNSUPPORTED) {
+        return;
+    } else if (status != UCS_OK) {
+        ucs_warn("failed to build topology groups: %s",
+                 ucs_status_string(status));
+        return;
+    }
+
+    printf("#\n# System topology groups\n#\n");
+
+    status = ucs_topo_groups_render(NULL, &groups, "# ", &strb);
+    if (status != UCS_OK) {
+        ucs_warn("topology groups table render incomplete: %s",
+                 ucs_status_string(status));
+    }
+
+    printf("%s\n", ucs_string_buffer_cstr(&strb));
+
+    ucs_string_buffer_cleanup(&strb);
+    ucs_topo_release_groups(&groups);
+}
+
 static void print_sys_topo()
 {
     const unsigned num_devices = ucs_topo_num_devices();
 
     print_sys_topo_distances(num_devices);
     print_sys_topo_memory_latency(num_devices);
+    print_sys_topo_groups();
 }
 
 static double measure_timer_accuracy()

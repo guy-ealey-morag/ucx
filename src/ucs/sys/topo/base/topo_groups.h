@@ -94,15 +94,18 @@ void ucs_topo_release_group(ucs_topo_group_t *group);
 /**
  * Render system topology groups as a table.
  *
- * @param [in]  devices  Array of registered system devices.
- * @param [in]  groups   System topology groups to render.
- * @param [out] strb     String buffer to append the rendered table to.
+ * @param [in]  devices     Array of system devices, or NULL to use the global
+ *                          system device registry.
+ * @param [in]  groups      System topology groups to render.
+ * @param [in]  row_prefix  String to prepend to every table row.
+ * @param [out] strb        String buffer to append the rendered table to.
  *
  * @return UCS_OK on success, or an error status if table rendering was
  *         incomplete.
  */
 ucs_status_t ucs_topo_groups_render(const ucs_topo_sys_device_info_t *devices,
                                     const ucs_topo_groups_t *groups,
+                                    const char *row_prefix,
                                     ucs_string_buffer_t *strb);
 
 
