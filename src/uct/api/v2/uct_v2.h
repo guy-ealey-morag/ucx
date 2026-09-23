@@ -990,8 +990,21 @@ typedef enum uct_md_attr_field {
     UCT_MD_ATTR_FIELD_GVA_MEM_TYPES             = UCS_BIT(17),
 
     /** Memory flags required for registration by this MD. */
-    UCT_MD_ATTR_FIELD_REQUIRED_MEM_FLAGS        = UCS_BIT(18)
+    UCT_MD_ATTR_FIELD_REQUIRED_MEM_FLAGS        = UCS_BIT(18),
+
+    /** Flags describing the device behind the MD. */
+    UCT_MD_ATTR_FIELD_DEVICE_FLAGS              = UCS_BIT(19)
 } uct_md_attr_field_t;
+
+
+/**
+ * @ingroup UCT_MD
+ * @brief Flags describing the device behind a memory domain.
+ */
+typedef enum {
+    /** The device is a DPU, for example a BlueField. */
+    UCT_MD_DEVICE_FLAG_DPU = UCS_BIT(0)
+} uct_md_device_flags_t;
 
 
 /**
@@ -1111,6 +1124,12 @@ typedef struct {
      * Memory flags required for registration by this MD.
      */
     uint8_t           required_mem_flags;
+
+    /**
+     * Flags describing the device behind the MD, using bits from
+     * @ref uct_md_device_flags_t.
+     */
+    uint64_t          device_flags;
 } uct_md_attr_v2_t;
 
 

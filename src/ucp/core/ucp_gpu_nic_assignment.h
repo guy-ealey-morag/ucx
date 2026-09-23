@@ -43,9 +43,11 @@ struct ucp_gpu_nic_assignment {
  * @note The groups must be disjoint: each sys_dev may appear in at most one
  *       topology group.
  *
- * @param [in]  groups        Topology groups to build assignments from.
- * @param [in]  mode          Assignment mode: flip, round-robin or shared.
- * @param [out] assignment_p  Completed assignment. Updated only on success.
+ * @param [in]  groups          Topology groups to build assignments from.
+ * @param [in]  mode            Assignment mode: flip, round-robin or shared.
+ * @param [in]  candidate_nics  Network sys_devs that may be assigned. A NIC is
+ *                              skipped unless all of its sys_devs are set.
+ * @param [out] assignment_p    Completed assignment. Updated only on success.
  *
  * @return UCS_OK on success, or an error status if assignment construction
  *         failed.
@@ -53,6 +55,7 @@ struct ucp_gpu_nic_assignment {
 ucs_status_t
 ucp_gpu_nic_assignment_build(const ucs_topo_groups_t *groups,
                              ucp_gpu_nic_assignment_mode_t mode,
+                             const ucp_gpu_nic_sys_dev_bitmap_t *candidate_nics,
                              ucp_gpu_nic_assignment_t *assignment_p);
 
 

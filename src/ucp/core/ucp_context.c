@@ -1397,6 +1397,34 @@ ucp_add_tl_resource(ucp_context_h context, ucp_md_index_t md_index,
     return UCS_OK;
 }
 
+static void ucp_gpu_nic_candidate_add(ucp_context_h context,
+                                      const ucp_tl_md_t *md,
+                                      const uct_tl_resource_desc_t *resource)
+{
+    const char *reason;
+
+    if ((resource->dev_type != UCT_DEVICE_TYPE_NET) ||
+        (resource->sys_device == UCS_SYS_DEVICE_ID_UNKNOWN)) {
+        return;
+    }
+
+    if (!(md->attr.flags & UCT_MD_FLAG_REG)) {
+        reason = "no memory registration";
+    } else if (md->attr.device_flags & UCT_MD_DEVICE_FLAG_DPU) {
+        reason = "dpu";
+    } else {
+        UCS_STATIC_BITMAP_SET(&context->gpu_nic_candidates,
+                              resource->sys_device);
+        return;
+    }
+
+    ucs_debug("sys_dev %u (%s) of " UCT_TL_RESOURCE_DESC_FMT
+              " is not a gpu-nic assignment candidate: %s",
+              resource->sys_device,
+              ucs_topo_sys_device_get_name(resource->sys_device),
+              UCT_TL_RESOURCE_DESC_ARG(resource), reason);
+}
+
 static ucs_status_t
 ucp_add_tl_resources(ucp_context_h context, ucp_md_index_t md_index,
                      const ucp_config_t *config,
@@ -1469,6 +1497,7 @@ ucp_add_tl_resources(ucp_context_h context, ucp_md_index_t md_index,
                             "'%s'(%s)", tl_resources[i].dev_name,
                             context->tl_cmpts[md->cmpt_index].attr.name);
         ucs_string_set_add(avail_tls, tl_resources[i].tl_name);
+        ucp_gpu_nic_candidate_add(context, md, &tl_resources[i]);
 
         if (!ucp_is_resource_enabled(&tl_resources[i], config, aux_tls,
                                      &rsc_flags, dev_cfg_masks, tl_cfg_mask)) {
@@ -2783,9 +2812,10 @@ ucp_version_check(unsigned api_major_version, unsigned api_minor_version)
     ucs_debug("Configured with: %s", UCX_CONFIGURE_FLAGS);
 }
 
-static ucs_status_t
-ucp_context_gpu_nic_assignment_init(ucp_gpu_nic_assignment_mode_t mode,
-                                    ucp_gpu_nic_assignment_t **assignment_p)
+static ucs_status_t ucp_context_gpu_nic_assignment_init(
+        ucp_gpu_nic_assignment_mode_t mode,
+        const ucp_gpu_nic_sys_dev_bitmap_t *candidate_nics,
+        ucp_gpu_nic_assignment_t **assignment_p)
 {
     ucp_gpu_nic_assignment_t *assignment;
     ucs_topo_groups_t groups;
@@ -2827,7 +2857,8 @@ ucp_context_gpu_nic_assignment_init(ucp_gpu_nic_assignment_mode_t mode,
         goto out_release_groups;
     }
 
-    status = ucp_gpu_nic_assignment_build(&groups, mode, assignment);
+    status = ucp_gpu_nic_assignment_build(&groups, mode, candidate_nics,
+                                          assignment);
     if (status != UCS_OK) {
         ucs_free(assignment);
         goto out_release_groups;
@@ -2896,7 +2927,7 @@ ucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_ver
 
     status = ucp_context_gpu_nic_assignment_init(
             context->config.ext.gpu_nic_assignment_mode,
-            &context->gpu_nic_assignment);
+            &context->gpu_nic_candidates, &context->gpu_nic_assignment);
     if (status != UCS_OK) {
         goto err_free_res;
     }

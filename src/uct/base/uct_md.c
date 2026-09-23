@@ -454,6 +454,8 @@ uct_md_attr_v2_copy(uct_md_attr_v2_t *dst, const uct_md_attr_v2_t *src)
                               UCT_MD_ATTR_FIELD_REG_ALIGNMENT);
     UCT_MD_ATTR_V2_FIELD_COPY(dst, src, required_mem_flags,
                               UCT_MD_ATTR_FIELD_REQUIRED_MEM_FLAGS);
+    UCT_MD_ATTR_V2_FIELD_COPY(dst, src, device_flags,
+                              UCT_MD_ATTR_FIELD_DEVICE_FLAGS);
 }
 
 static ucs_status_t uct_md_attr_v2_init(uct_md_h md, uct_md_attr_v2_t *md_attr)
@@ -525,6 +527,7 @@ void uct_md_base_md_query(uct_md_attr_v2_t *md_attr)
     md_attr->exported_mkey_packed_size = 0;
     md_attr->reg_alignment             = 1;
     md_attr->required_mem_flags        = 0;
+    md_attr->device_flags              = 0;
     memset(&md_attr->local_cpus, 0xff, sizeof(md_attr->local_cpus));
 }
 

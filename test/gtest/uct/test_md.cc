@@ -1,5 +1,5 @@
 /**
-* Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2001-2016. ALL RIGHTS RESERVED.
+* Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2001-2026. ALL RIGHTS RESERVED.
 * Copyright (C) Advanced Micro Devices, Inc. 2016 - 2017. ALL RIGHTS RESERVED.
 * Copyright (C) Intel Corporation, 2026. ALL RIGHTS RESERVED.
 * See file LICENSE for terms.
@@ -597,6 +597,19 @@ UCS_TEST_P(test_md, mem_query) {
 
         UCS_TEST_MESSAGE << ucs_memory_type_names[mem_type] << ": "
                          << ucs_topo_sys_device_get_name(mem_attr.sys_dev);
+    }
+}
+
+UCS_TEST_P(test_md, device_flags) {
+    uct_md_attr_v2_t attr;
+
+    attr.field_mask = UCT_MD_ATTR_FIELD_DEVICE_FLAGS;
+    ASSERT_UCS_OK(uct_md_query_v2(md(), &attr));
+
+    EXPECT_EQ(md_attr().device_flags, attr.device_flags);
+    EXPECT_EQ(0ul, attr.device_flags & ~(uint64_t)UCT_MD_DEVICE_FLAG_DPU);
+    if (strcmp(md_attr().component_name, "ib")) {
+        EXPECT_EQ(0ul, attr.device_flags);
     }
 }
 
