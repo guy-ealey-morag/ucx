@@ -535,6 +535,7 @@ private:
     {
         unsigned num_used = 0;
         const ucp_proto_threshold_elem_t *thresh;
+        size_t range_start;
         khiter_t khiter;
 
         for (khiter = kh_begin(proto_select->hash);
@@ -543,13 +544,16 @@ private:
                 continue;
             }
 
-            thresh = kh_val(proto_select->hash, khiter).thresholds;
+            thresh      = kh_val(proto_select->hash, khiter).thresholds;
+            range_start = 0;
             do {
                 if ((thresh->proto_config.selections > 0) &&
                     (proto_name == thresh->proto_config.proto->name)) {
-                    expect_assigned_lanes(worker, &thresh->proto_config);
+                    expect_assigned_lanes(worker, &thresh->proto_config,
+                                          range_start);
                     ++num_used;
                 }
+                range_start = thresh->max_msg_length + 1;
             } while ((thresh++)->max_msg_length < SIZE_MAX);
         }
 
@@ -557,7 +561,8 @@ private:
     }
 
     void expect_assigned_lanes(ucp_worker_h worker,
-                               const ucp_proto_config_t *proto_config)
+                               const ucp_proto_config_t *proto_config,
+                               size_t msg_length)
     {
         const ucp_context_h context = worker->context;
         const ucp_ep_config_t *ep_config =
@@ -574,7 +579,7 @@ private:
                 << proto_config->proto->name << " buffer sys_dev "
                 << static_cast<int>(gpu_sys_dev);
 
-        ucp_proto_config_query(worker, proto_config, UCS_KBYTE, &attr);
+        ucp_proto_config_query(worker, proto_config, msg_length, &attr);
         ucs_for_each_bit(lane, attr.lane_map) {
             tl_rsc = &context->tl_rscs[ep_config->key.lanes[lane].rsc_index]
                               .tl_rsc;
