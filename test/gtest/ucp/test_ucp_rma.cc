@@ -454,6 +454,8 @@ public:
         /* Enough lanes to use every NIC assigned to a GPU */
         modify_config("MAX_RMA_LANES", "8");
         modify_config("MAX_RNDV_LANES", "8");
+        /* Count protocol selections, which expect_assigned_lanes() checks */
+        modify_config("PROTO_INFO", "used");
         test_ucp_rma::init();
     }
 
