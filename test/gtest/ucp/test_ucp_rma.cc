@@ -506,7 +506,8 @@ private:
      * the GPU of the buffer it moved */
     void expect_assigned_lanes(const std::string &proto_name)
     {
-        unsigned num_used = 0;
+        unsigned num_used       = 0;
+        unsigned num_restricted = 0;
         ucp_ep_config_t *ep_config;
         ucp_rkey_config_t *rkey_config;
         ucp_worker_h worker;
@@ -514,26 +515,28 @@ private:
         for (auto iter = entities().begin(); iter != entities().end(); ++iter) {
             worker = (*iter)->worker();
             ucs_array_for_each(ep_config, &worker->ep_config) {
-                num_used += expect_assigned_lanes(worker,
-                                                  &ep_config->proto_select,
-                                                  proto_name);
+                expect_assigned_lanes(worker, &ep_config->proto_select,
+                                      proto_name, num_used, num_restricted);
             }
 
             ucs_array_for_each(rkey_config, &worker->rkey_config) {
-                num_used += expect_assigned_lanes(worker,
-                                                  &rkey_config->proto_select,
-                                                  proto_name);
+                expect_assigned_lanes(worker, &rkey_config->proto_select,
+                                      proto_name, num_used, num_restricted);
             }
         }
 
-        EXPECT_GT(num_used, 0u) << proto_name << " was not used";
+        ASSERT_GT(num_used, 0u) << proto_name << " was not used";
+        if (num_restricted == 0) {
+            UCS_TEST_SKIP_R("the assignment keeps every bandwidth nic of the "
+                            "endpoints");
+        }
     }
 
-    unsigned expect_assigned_lanes(ucp_worker_h worker,
-                                   const ucp_proto_select_t *proto_select,
-                                   const std::string &proto_name)
+    void expect_assigned_lanes(ucp_worker_h worker,
+                               const ucp_proto_select_t *proto_select,
+                               const std::string &proto_name,
+                               unsigned &num_used, unsigned &num_restricted)
     {
-        unsigned num_used = 0;
         const ucp_proto_threshold_elem_t *thresh;
         size_t range_start;
         khiter_t khiter;
@@ -550,19 +553,31 @@ private:
                 if ((thresh->proto_config.selections > 0) &&
                     (proto_name == thresh->proto_config.proto->name)) {
                     expect_assigned_lanes(worker, &thresh->proto_config,
-                                          range_start);
+                                          range_start, num_restricted);
                     ++num_used;
                 }
                 range_start = thresh->max_msg_length + 1;
             } while ((thresh++)->max_msg_length < SIZE_MAX);
         }
+    }
 
-        return num_used;
+    static const uct_tl_resource_desc_t *
+    lane_tl_rsc(ucp_context_h context, const ucp_ep_config_t *ep_config,
+                ucp_lane_index_t lane)
+    {
+        return &context->tl_rscs[ep_config->key.lanes[lane].rsc_index].tl_rsc;
+    }
+
+    static bool is_unassigned_nic(const uct_tl_resource_desc_t *tl_rsc,
+                                  const ucp_gpu_nic_sys_dev_bitmap_t *bitmap)
+    {
+        return (tl_rsc->dev_type == UCT_DEVICE_TYPE_NET) &&
+               !ucp_gpu_nic_bitmap_get(bitmap, tl_rsc->sys_device);
     }
 
     void expect_assigned_lanes(ucp_worker_h worker,
                                const ucp_proto_config_t *proto_config,
-                               size_t msg_length)
+                               size_t msg_length, unsigned &num_restricted)
     {
         const ucp_context_h context = worker->context;
         const ucp_ep_config_t *ep_config =
@@ -581,12 +596,22 @@ private:
 
         ucp_proto_config_query(worker, proto_config, msg_length, &attr);
         ucs_for_each_bit(lane, attr.lane_map) {
-            tl_rsc = &context->tl_rscs[ep_config->key.lanes[lane].rsc_index]
-                              .tl_rsc;
-            if (tl_rsc->dev_type == UCT_DEVICE_TYPE_NET) {
-                EXPECT_TRUE(ucp_gpu_nic_bitmap_get(bitmap, tl_rsc->sys_device))
-                        << proto_config->proto->name << " lane " << lane
-                        << " on unassigned " << tl_rsc->dev_name;
+            tl_rsc = lane_tl_rsc(context, ep_config, lane);
+            EXPECT_FALSE(is_unassigned_nic(tl_rsc, bitmap))
+                    << proto_config->proto->name << " lane "
+                    << static_cast<int>(lane) << " on unassigned "
+                    << tl_rsc->dev_name;
+        }
+
+        /* Without a bandwidth lane on an unassigned NIC, the check above
+         * passes even if the protocol ignores the assignment */
+        for (lane = 0; lane < ep_config->key.num_lanes; ++lane) {
+            if ((ep_config->key.lanes[lane].lane_types &
+                 UCS_BIT(UCP_LANE_TYPE_RMA_BW)) &&
+                is_unassigned_nic(lane_tl_rsc(context, ep_config, lane),
+                                  bitmap)) {
+                ++num_restricted;
+                break;
             }
         }
     }
