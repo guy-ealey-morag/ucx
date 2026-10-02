@@ -3026,6 +3026,65 @@ protected:
         return mem_info.sys_dev;
     }
 
+    /* NICs of the sender's put/zcopy as estimated by the receiver's rndv/rtr,
+     * whose remote key is known */
+    sys_dev_set_t rtr_remote_estimate_nics(ucs_sys_device_t sys_dev)
+    {
+        ucp_worker_h worker = sender().worker();
+        const ucp_rkey_config_t *base_rkey_config =
+                ucp_worker_rkey_config(worker, rkey_config_index());
+        ucp_rkey_config_key_t rkey_config_key = base_rkey_config->key;
+        const ucp_proto_select_key_t select_key =
+                make_select_key(UCP_OP_ID_RNDV_RECV, UCS_MEMORY_TYPE_CUDA,
+                                UCP_DATATYPE_CONTIG, sys_dev, 1);
+        const ucp_proto_select_elem_t *select_elem;
+        const ucp_proto_threshold_elem_t *threshold;
+        const ucp_proto_rndv_ctrl_priv_t *rpriv;
+        ucp_worker_cfg_index_t rkey_cfg_index;
+        ucp_rkey_config_t *rkey_config;
+        ucp_proto_query_attr_t attr;
+        ucs_status_t status;
+
+        /* With matching memory types, the remote estimate assumes the peer's
+         * buffer is on the local buffer's GPU */
+        rkey_config_key.mem_type = UCS_MEMORY_TYPE_CUDA;
+        status = ucp_worker_rkey_config_get(worker, &rkey_config_key,
+                                            base_rkey_config->lanes_distance,
+                                            &rkey_cfg_index);
+        if (status != UCS_OK) {
+            ADD_FAILURE() << "failed to get cuda rkey config: "
+                          << ucs_status_string(status);
+            return {};
+        }
+
+        rkey_config = ucp_worker_rkey_config(worker, rkey_cfg_index);
+        select_elem = ucp_proto_select_lookup_slow(worker,
+                                                   &rkey_config->proto_select,
+                                                   1, ep_config_index(sender()),
+                                                   rkey_cfg_index,
+                                                   &select_key.param);
+        if (select_elem == nullptr) {
+            ADD_FAILURE() << "protocol selection failed";
+            return {};
+        }
+
+        threshold = ucp_proto_thresholds_search_slow(select_elem->thresholds,
+                                                     UCS_MBYTE);
+        if (strcmp(threshold->proto_config.proto->name, "rndv/rtr") != 0) {
+            ADD_FAILURE() << "expected rndv/rtr protocol, got "
+                          << threshold->proto_config.proto->name;
+            return {};
+        }
+
+        rpriv = static_cast<const ucp_proto_rndv_ctrl_priv_t*>(
+                threshold->proto_config.priv);
+        EXPECT_STREQ("rndv/put/zcopy", rpriv->remote_proto_config.proto->name);
+
+        ucp_proto_config_query(worker, &rpriv->remote_proto_config, UCS_MBYTE,
+                               &attr);
+        return lane_map_sys_devs(attr.lane_map);
+    }
+
     sys_dev_set_t endpoint_nics() const
     {
         return {m_nics[0], m_nics[1], m_nics[2]};
@@ -3396,6 +3455,51 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic,
 
     ucp_proto_config_query(sender().worker(), remote_config, UCS_MBYTE, &attr);
     EXPECT_EQ(sys_dev_set_t{nic(2)}, lane_map_sys_devs(attr.lane_map));
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic,
+           rndv_remote_estimate_keeps_unmatched_lanes, "RNDV_THRESH=1",
+           "RNDV_SCHEME=get_zcopy")
+{
+    const ucp_proto_config_t *remote_config;
+    ucp_proto_query_attr_t attr;
+
+    /* The GPU has no NICs, so the local protocol is dropped */
+    install_assignment(mapped_gpu(), {});
+    EXPECT_FALSE(has_protocol_candidate(UCP_OP_ID_RNDV_RECV,
+                                        UCS_MEMORY_TYPE_CUDA,
+                                        UCP_DATATYPE_CONTIG, mapped_gpu(), 1,
+                                        "rndv/get/zcopy"));
+
+    /* The peer's buffer may be on a GPU with NICs, so the remote estimate
+     * keeps all lanes rather than dropping the candidate */
+    remote_config = am_rndv_remote_proto_config(UCS_MEMORY_TYPE_CUDA,
+                                                mapped_gpu());
+    ASSERT_NE(nullptr, remote_config);
+    EXPECT_STREQ("rndv/get/zcopy", remote_config->proto->name);
+
+    ucp_proto_config_query(sender().worker(), remote_config, UCS_MBYTE, &attr);
+    EXPECT_EQ(endpoint_nics(), lane_map_sys_devs(attr.lane_map));
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic,
+           rndv_rtr_remote_estimate_uses_local_assignment, "RNDV_THRESH=1",
+           "RNDV_SCHEME=put_zcopy")
+{
+    install_assignment(mapped_gpu(), {nic(2)});
+
+    EXPECT_EQ(sys_dev_set_t{nic(2)}, rtr_remote_estimate_nics(mapped_gpu()));
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic,
+           rndv_rtr_remote_estimate_keeps_unmatched_lanes, "RNDV_THRESH=1",
+           "RNDV_SCHEME=put_zcopy")
+{
+    /* The GPU has no NICs, so the remote estimate keeps all lanes rather than
+     * dropping the candidate */
+    install_assignment(mapped_gpu(), {});
+
+    EXPECT_EQ(endpoint_nics(), rtr_remote_estimate_nics(mapped_gpu()));
 }
 
 UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic, full_assignment_keeps_all_lanes)
