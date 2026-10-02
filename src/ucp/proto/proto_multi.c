@@ -71,6 +71,13 @@ const ucs_sys_device_bitmap_t *ucp_proto_multi_get_assigned_nic_bitmap(
         goto out;
     }
 
+    if (ucp_proto_multi_is_remote_estimation(init_params)) {
+        /* The estimated protocol runs on the peer, so the local assignment
+         * does not apply */
+        owner_desc = "remote protocol estimation";
+        goto out;
+    }
+
     if (params->super.reg_mem_info.type == UCS_MEMORY_TYPE_UNKNOWN) {
         /* Buffer is not registered (e.g. bcopy), so it has no NIC affinity. */
         owner_desc = "unregistered buffer";
@@ -521,7 +528,6 @@ static ucs_status_t ucp_proto_multi_filter_gpu_nic_lanes(
     ucp_lane_index_t num_lanes                 = *num_lanes_p;
     ucp_lane_index_t num_filtered_lanes        = 0;
     ucp_lane_index_t num_bulk_lanes_kept       = 0;
-    ucp_lane_map_t kept_index_map              = 0;
     const ucs_sys_device_bitmap_t *assigned_nic_bitmap;
     ucp_lane_index_t i, lane, num_removed_lanes;
     ucp_lane_type_t lane_type;
@@ -547,13 +553,13 @@ static ucs_status_t ucp_proto_multi_filter_gpu_nic_lanes(
              * rndv/am. RMA_BW protocols declare no AM lane type, so all their
              * lanes are checked and no traffic can leak.
              * TODO: restrict the AM lane as well. */
-            kept_index_map |= UCS_BIT(i);
+            lanes[num_filtered_lanes++] = lane;
             continue;
         }
 
         /* The assignment covers only NICs, e.g. cuda_ipc lanes are kept */
         if (!ucp_proto_common_is_net_dev(init_params, lane)) {
-            kept_index_map |= UCS_BIT(i);
+            lanes[num_filtered_lanes++] = lane;
             ++num_bulk_lanes_kept;
             continue;
         }
@@ -567,7 +573,7 @@ static ucs_status_t ucp_proto_multi_filter_gpu_nic_lanes(
             ucs_trace("assignment keeps lane %d: md %s cannot register the "
                       "buffer",
                       lane, context->tl_mds[md_index].rsc.md_name);
-            kept_index_map |= UCS_BIT(i);
+            lanes[num_filtered_lanes++] = lane;
             ++num_bulk_lanes_kept;
             continue;
         }
@@ -583,26 +589,14 @@ static ucs_status_t ucp_proto_multi_filter_gpu_nic_lanes(
 
         ucs_trace("assignment keeps lane %d on network sys_dev %d", lane,
                   lane_sys_dev);
-        kept_index_map |= UCS_BIT(i);
+        lanes[num_filtered_lanes++] = lane;
         ++num_bulk_lanes_kept;
     }
 
-    num_removed_lanes = num_lanes - ucs_popcount(kept_index_map);
+    num_removed_lanes = num_lanes - num_filtered_lanes;
 
     /* Drop the protocol if the assignment removed all its bulk lanes */
     if ((num_removed_lanes > 0) && (num_bulk_lanes_kept == 0)) {
-        if (ucp_proto_multi_is_remote_estimation(init_params)) {
-            /* The peer's buffer may be on another GPU, whose NICs the lanes
-             * may reach, so assume the peer can use all of them */
-            ucs_trace("proto %s: no lane matches the assignment of gpu %s "
-                      "(sys_dev %d), keeping all %u lanes for the remote "
-                      "estimation",
-                      ucp_proto_id_field(init_params->proto_id, name),
-                      ucs_topo_sys_device_get_name(gpu_sys_dev), gpu_sys_dev,
-                      num_lanes);
-            return UCS_OK;
-        }
-
         ucs_debug("proto %s: no lane matches the assignment of gpu %s "
                   "(sys_dev %d), dropping %u lanes",
                   ucp_proto_id_field(init_params->proto_id, name),
@@ -611,13 +605,8 @@ static ucs_status_t ucp_proto_multi_filter_gpu_nic_lanes(
         return UCS_ERR_NO_ELEM;
     }
 
-    ucs_for_each_bit(i, kept_index_map) {
-        lanes[num_filtered_lanes++] = lanes[i];
-    }
-    *num_lanes_p = num_filtered_lanes;
-
     ucs_trace("assignment retained %u/%u lanes", num_filtered_lanes, num_lanes);
-
+    *num_lanes_p = num_filtered_lanes;
     return UCS_OK;
 }
 
