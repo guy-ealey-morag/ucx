@@ -15,6 +15,7 @@
 #include "proto_common.inl"
 
 #include <ucp/am/ucp_am.inl>
+#include <ucp/core/ucp_gpu_nic_assignment.h>
 #include <ucp/core/ucp_worker.inl>
 #include <ucs/memory/memory_type.h>
 #include <ucs/sys/math.h>
@@ -45,10 +46,35 @@ static void ucp_proto_reconfig_abort(ucp_request_t *req, ucs_status_t status)
     ucp_request_complete_send(req, status);
 }
 
+/* Explain a missing protocol by a GPU that is assigned no NICs */
+static void
+ucp_proto_reconfig_gpu_nic_hint(ucp_ep_h ep,
+                                const ucp_proto_select_param_t *select_param,
+                                ucs_string_buffer_t *strb)
+{
+    ucp_context_h context = ep->worker->context;
+    char bdf_name[UCS_SYS_BDF_NAME_MAX];
+
+    if ((context->gpu_nic_assignment == NULL) ||
+        !ucp_gpu_nic_assignment_is_empty(context->gpu_nic_assignment,
+                                         select_param->sys_dev)) {
+        return;
+    }
+
+    ucs_string_buffer_appendf(
+            strb,
+            " (gpu %s bdf %s is assigned 0 nics, see "
+            "UCX_GPU_NIC_ASSIGNMENT_MODE)",
+            ucs_topo_sys_device_get_name(select_param->sys_dev),
+            ucs_topo_sys_device_bdf_name(select_param->sys_dev, bdf_name,
+                                         sizeof(bdf_name)));
+}
+
 static int
 ucp_proto_reconfig_report_no_rma_emulation_no_proto(ucp_request_t *req,
                                                     ucp_ep_h ep)
 {
+    UCS_STRING_BUFFER_ONSTACK(hint, 128);
     ucp_operation_id_t op_id;
     ucs_memory_type_t local_mem_type, remote_mem_type;
 
@@ -63,8 +89,10 @@ ucp_proto_reconfig_report_no_rma_emulation_no_proto(ucp_request_t *req,
 
     local_mem_type  = req->send.proto_config->select_param.mem_type;
     remote_mem_type = req->send.rma.rkey->mem_type;
+    ucp_proto_reconfig_gpu_nic_hint(ep, &req->send.proto_config->select_param,
+                                    &hint);
 
-    ucs_error("No zero-copy protocol found for %s %s %s %s, %zu bytes. "
+    ucs_error("No zero-copy protocol found for %s %s %s %s, %zu bytes%s. "
               "Please check for proper GPU and/or HCA support, or set "
               "UCX_PROTO_EMULATION_ENABLE=y to proceed by allowing slower "
               "software emulation.",
@@ -72,7 +100,7 @@ ucp_proto_reconfig_report_no_rma_emulation_no_proto(ucp_request_t *req,
               ucs_memory_type_names[local_mem_type],
               (op_id == UCP_OP_ID_PUT) ? "to" : "from",
               ucs_memory_type_names[remote_mem_type],
-              req->send.state.dt_iter.length);
+              req->send.state.dt_iter.length, ucs_string_buffer_cstr(&hint));
     return 1;
 }
 
@@ -101,6 +129,9 @@ static ucs_status_t ucp_proto_reconfig_progress(uct_pending_req_t *self)
                                   req->send.proto_config->rkey_cfg_index,
                                   &req->send.proto_config->select_param,
                                   ucp_operation_names, &strb);
+        ucp_proto_reconfig_gpu_nic_hint(ep,
+                                        &req->send.proto_config->select_param,
+                                        &strb);
         ucs_error("cannot find remote protocol for: %s",
                   ucs_string_buffer_cstr(&strb));
 

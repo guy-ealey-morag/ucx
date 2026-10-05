@@ -131,6 +131,24 @@ ucp_gpu_nic_assignment_append_nic(const ucs_topo_group_element_t *nic,
                                    nic->num_sys_devs);
 }
 
+/* GPUs usable by this process are registered with their driver ordinal as the
+ * user value, while GPUs found only through NVML (e.g. hidden by
+ * CUDA_VISIBLE_DEVICES) have none */
+static int
+ucp_gpu_nic_assignment_gpu_is_visible(const ucs_topo_group_element_t *gpu)
+{
+    const ucs_sys_device_t *gpu_sys_dev;
+
+    ucs_carray_for_each(gpu_sys_dev, gpu->sys_devs, gpu->num_sys_devs) {
+        if (ucs_topo_sys_device_get_user_value(*gpu_sys_dev) !=
+            UCS_SYS_DEVICE_USER_VALUE_EMPTY) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static void
 ucp_gpu_nic_assignment_log_gpu(const ucp_gpu_nic_assignment_t *assignment,
                                const ucs_topo_group_t *group,
@@ -170,8 +188,13 @@ ucp_gpu_nic_assignment_log_gpu(const ucp_gpu_nic_assignment_t *assignment,
     }
 
     if (nic_strbs.count == 0) {
-        ucs_diag("gpu %s is assigned 0 nics",
-                 ucs_string_buffer_cstr(&gpu_strb));
+        ucs_log(ucp_gpu_nic_assignment_gpu_is_visible(gpu) ?
+                        UCS_LOG_LEVEL_WARN :
+                        UCS_LOG_LEVEL_DIAG,
+                "gpu %s is assigned 0 nics, so its memory cannot use the "
+                "network; check UCX_NET_DEVICES, UCX_TLS or "
+                "UCX_GPU_NIC_ASSIGNMENT_MODE",
+                ucs_string_buffer_cstr(&gpu_strb));
     } else {
         ucs_debug("gpu %s is assigned %zu nics: [%s] sys_devs [%s]",
                   ucs_string_buffer_cstr(&gpu_strb), nic_strbs.count,
@@ -215,7 +238,7 @@ ucp_gpu_nic_assignment_log(const ucp_gpu_nic_assignment_t *assignment,
     const ucs_topo_group_element_t *gpu;
     const ucs_topo_group_t *group;
 
-    if (!ucs_log_is_enabled(UCS_LOG_LEVEL_DIAG)) {
+    if (!ucs_log_is_enabled(UCS_LOG_LEVEL_WARN)) {
         return;
     }
 
