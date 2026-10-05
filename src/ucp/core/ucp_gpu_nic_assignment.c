@@ -403,6 +403,15 @@ ucp_gpu_nic_assignment_build(const ucs_topo_groups_t *groups,
     return UCS_OK;
 }
 
+int ucp_gpu_nic_assignment_is_empty(const ucp_gpu_nic_assignment_t *assignment,
+                                    ucs_sys_device_t gpu_sys_dev)
+{
+    const ucs_sys_device_bitmap_t *bitmap;
+
+    bitmap = ucp_gpu_nic_assignment_lookup(assignment, gpu_sys_dev);
+    return (bitmap != NULL) && UCS_STATIC_BITMAP_IS_ZERO(*bitmap);
+}
+
 int ucp_gpu_nic_bitmap_get(const ucs_sys_device_bitmap_t *bitmap,
                            ucs_sys_device_t net_sys_dev)
 {

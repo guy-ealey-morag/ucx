@@ -47,6 +47,12 @@ ucs_status_t ucp_proto_single_init(const ucp_proto_single_init_params_t *params,
 
     ucs_assert(num_lanes == 1);
 
+    status = ucp_proto_common_check_gpu_nic_lanes(&params->super,
+                                                  UCS_BIT(lane));
+    if (status != UCS_OK) {
+        return status;
+    }
+
     reg_md_map = ucp_proto_common_reg_md_map(&params->super, UCS_BIT(lane));
     if (reg_md_map == 0) {
         spriv->reg_md = UCP_NULL_RESOURCE;

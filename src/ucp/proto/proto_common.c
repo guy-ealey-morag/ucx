@@ -12,6 +12,7 @@
 #include "proto_common.inl"
 
 #include <ucp/am/ucp_am.inl>
+#include <ucp/core/ucp_gpu_nic_assignment.h>
 #include <ucp/wireup/wireup.h>
 #include <uct/api/v2/uct_v2.h>
 
@@ -158,6 +159,95 @@ ucp_proto_common_get_sys_dev(const ucp_proto_init_params_t *params,
 {
     ucp_rsc_index_t rsc_index = ucp_proto_common_get_rsc_index(params, lane);
     return params->worker->context->tl_rscs[rsc_index].tl_rsc.sys_device;
+}
+
+ucs_sys_device_t
+ucp_proto_common_get_owner_sys_dev(const ucp_proto_common_init_params_t *params)
+{
+    ucs_sys_device_t reg_sys_dev = params->reg_mem_info.sys_dev;
+
+    /* The device of the registered buffer is the staging buffer if any,
+     * otherwise it is the application buffer.
+     * Host staging and unregistered buffers have no device, so fall back to
+     * the application buffer's device. */
+    return (reg_sys_dev != UCS_SYS_DEVICE_ID_UNKNOWN) ?
+                   reg_sys_dev :
+                   params->super.select_param->sys_dev;
+}
+
+ucs_memory_type_t
+ucp_proto_common_get_owner_mem_type(const ucp_proto_common_init_params_t *params)
+{
+    ucs_memory_type_t reg_mem_type = params->reg_mem_info.type;
+
+    /* The memory type of the registered buffer is the staging buffer's if any,
+     * otherwise the application buffer's.
+     * Only unregistered buffers have no memory type, so fall back to the
+     * application buffer's memory type. */
+    return (reg_mem_type != UCS_MEMORY_TYPE_UNKNOWN) ?
+                   reg_mem_type :
+                   (ucs_memory_type_t)params->super.select_param->mem_type;
+}
+
+int ucp_proto_common_lane_is_assignable_nic(
+        const ucp_proto_init_params_t *params, ucs_memory_type_t mem_type,
+        ucp_lane_index_t lane)
+{
+    ucp_context_h context = params->worker->context;
+    ucp_md_index_t md_index;
+
+    /* The assignment covers only NICs, e.g. cuda_ipc lanes are not covered */
+    if (!ucp_proto_common_is_net_dev(params, lane)) {
+        return 0;
+    }
+
+    /* The assignment covers only NICs that can register the buffer (e.g. tcp
+     * lanes are not covered) */
+    md_index = context->tl_rscs[ucp_proto_common_get_rsc_index(params, lane)]
+                       .md_index;
+    if (!UCS_BIT_GET(context->reg_md_map[mem_type], md_index)) {
+        ucs_trace("lane %d is not covered by the assignment: md %s cannot "
+                  "register %s memory",
+                  lane, context->tl_mds[md_index].rsc.md_name,
+                  ucs_memory_type_names[mem_type]);
+        return 0;
+    }
+
+    return 1;
+}
+
+ucs_status_t ucp_proto_common_check_gpu_nic_lanes(
+        const ucp_proto_common_init_params_t *params, ucp_lane_map_t lane_map)
+{
+    ucp_context_h context = params->super.worker->context;
+    ucs_sys_device_t owner_sys_dev;
+    ucs_memory_type_t mem_type;
+    ucp_lane_index_t lane;
+
+    if (context->gpu_nic_assignment == NULL) {
+        return UCS_OK;
+    }
+
+    owner_sys_dev = ucp_proto_common_get_owner_sys_dev(params);
+    if (!ucp_gpu_nic_assignment_is_empty(context->gpu_nic_assignment,
+                                         owner_sys_dev)) {
+        return UCS_OK;
+    }
+
+    mem_type = ucp_proto_common_get_owner_mem_type(params);
+    ucs_for_each_bit(lane, lane_map) {
+        if (ucp_proto_common_lane_is_assignable_nic(&params->super, mem_type,
+                                                    lane)) {
+            ucs_debug("proto %s: gpu %s (sys_dev %d) is assigned 0 nics, "
+                      "dropping it",
+                      ucp_proto_id_field(params->super.proto_id, name),
+                      ucs_topo_sys_device_get_name(owner_sys_dev),
+                      owner_sys_dev);
+            return UCS_ERR_NO_ELEM;
+        }
+    }
+
+    return UCS_OK;
 }
 
 /* Pack/unpack local distance to make it equal to the remote one */

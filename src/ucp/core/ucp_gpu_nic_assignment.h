@@ -68,6 +68,19 @@ ucp_gpu_nic_assignment_lookup(const ucp_gpu_nic_assignment_t *assignment,
 
 
 /**
+ * Test whether a GPU system device is assigned no NICs.
+ *
+ * @param [in] assignment  GPU-to-NIC assignment.
+ * @param [in] gpu_sys_dev GPU system device to test.
+ *
+ * @return Nonzero if @a gpu_sys_dev is represented in the assignment and has
+ *         no assigned NICs, or zero otherwise.
+ */
+int ucp_gpu_nic_assignment_is_empty(const ucp_gpu_nic_assignment_t *assignment,
+                                    ucs_sys_device_t gpu_sys_dev);
+
+
+/**
  * Test whether a network system device is present in a GPU assignment bitmap.
  *
  * @param [in] bitmap       Valid GPU-to-NIC assignment bitmap.

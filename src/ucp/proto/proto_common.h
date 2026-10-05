@@ -262,6 +262,33 @@ ucp_proto_common_get_sys_dev(const ucp_proto_init_params_t *params,
                              ucp_lane_index_t lane);
 
 
+ucs_sys_device_t
+ucp_proto_common_get_owner_sys_dev(const ucp_proto_common_init_params_t *params);
+
+
+ucs_memory_type_t ucp_proto_common_get_owner_mem_type(
+        const ucp_proto_common_init_params_t *params);
+
+
+/**
+ * Check whether a lane is on a NIC that the GPU-NIC assignment covers: a
+ * network device whose memory domain can register memory of @a mem_type.
+ */
+int ucp_proto_common_lane_is_assignable_nic(
+        const ucp_proto_init_params_t *params, ucs_memory_type_t mem_type,
+        ucp_lane_index_t lane);
+
+
+/**
+ * Reject a protocol for the memory of a GPU that is assigned no NICs, if any
+ * lane in @a lane_map is on a NIC that the GPU-NIC assignment covers.
+ *
+ * @return UCS_ERR_NO_ELEM if the protocol must be dropped, UCS_OK otherwise.
+ */
+ucs_status_t ucp_proto_common_check_gpu_nic_lanes(
+        const ucp_proto_common_init_params_t *params, ucp_lane_map_t lane_map);
+
+
 void ucp_proto_common_get_lane_distance(const ucp_proto_init_params_t *params,
                                         ucp_lane_index_t lane,
                                         ucs_sys_device_t sys_dev,

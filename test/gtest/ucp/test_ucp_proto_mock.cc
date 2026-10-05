@@ -3490,6 +3490,27 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_cuda,
                                "put/offload/bcopy", {nic(2)});
 }
 
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_cuda,
+           empty_assignment_rejects_bcopy_protocols)
+{
+    /* put/am/bcopy uses only the AM lane, which the assignment does not
+     * restrict for a GPU that has NICs */
+    static const char *protocols[] = {"put/offload/bcopy", "put/am/bcopy"};
+
+    install_assignment(mapped_gpu(), {});
+
+    for (auto protocol : protocols) {
+        EXPECT_TRUE(has_protocol_candidate(UCP_OP_ID_PUT, UCS_MEMORY_TYPE_CUDA,
+                                           UCP_DATATYPE_CONTIG, unmapped_gpu(),
+                                           1, protocol))
+                << protocol;
+        EXPECT_FALSE(has_protocol_candidate(UCP_OP_ID_PUT, UCS_MEMORY_TYPE_CUDA,
+                                            UCP_DATATYPE_CONTIG, mapped_gpu(),
+                                            1, protocol))
+                << protocol;
+    }
+}
+
 UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_proto_mock_rcx_gpu_nic_cuda, rcx_gpu,
                               "rc_x,cuda,rocm")
 
@@ -3576,6 +3597,32 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_am_bw,
                                             1, proto.name))
                 << proto.name;
     }
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_am_bw,
+           empty_assignment_rejects_am_protocols, "RNDV_THRESH=1")
+{
+    install_assignment(mapped_gpu(), {});
+
+    /* The AM lane alone does not keep the protocols of a GPU without NICs */
+    for (const auto &proto : gpu_nic_am_bw_protocols) {
+        EXPECT_TRUE(has_protocol_candidate(proto.op_id, UCS_MEMORY_TYPE_CUDA,
+                                           UCP_DATATYPE_CONTIG, unmapped_gpu(),
+                                           1, proto.name))
+                << proto.name;
+        EXPECT_FALSE(has_protocol_candidate(proto.op_id, UCS_MEMORY_TYPE_CUDA,
+                                            UCP_DATATYPE_CONTIG, mapped_gpu(),
+                                            1, proto.name))
+                << proto.name;
+    }
+
+    EXPECT_TRUE(has_protocol_candidate(UCP_OP_ID_TAG_SEND, UCS_MEMORY_TYPE_CUDA,
+                                       UCP_DATATYPE_CONTIG, unmapped_gpu(), 1,
+                                       "egr/single/zcopy"));
+    EXPECT_FALSE(has_protocol_candidate(UCP_OP_ID_TAG_SEND,
+                                        UCS_MEMORY_TYPE_CUDA,
+                                        UCP_DATATYPE_CONTIG, mapped_gpu(), 1,
+                                        "egr/single/zcopy"));
 }
 
 UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_proto_mock_rcx_gpu_nic_am_bw, rcx_gpu,
