@@ -586,12 +586,6 @@ static ucs_config_field_t ucp_context_config_table[] = {
    " 'n' : Select RMA/AMO lanes according to performance charasteristics",
    ucs_offsetof(ucp_context_config_t, prefer_offload), UCS_CONFIG_TYPE_BOOL},
 
-  {"RMA_BW_MEASURE", "n",
-   "Sample completed payload throughput of multi-lane PUT/GET zcopy operations. "
-   "This experimental option records measurements but does not change lane "
-   "weights.",
-   ucs_offsetof(ucp_context_config_t, rma_bw_measure), UCS_CONFIG_TYPE_BOOL},
-
   {"PROTO_OVERHEAD", "single:5ns,multi:10ns,rndv_offload:40ns,rndv_rtr:40ns,"
                      "rndv_rts:275ns,sw:40ns,rkey_ptr:0",
    "Protocol overhead", 0,
@@ -861,7 +855,10 @@ const char *ucp_feature_str[] = {
 };
 
 
-const ucp_tl_bitmap_t ucp_tl_bitmap_max = {{UINT64_MAX, UINT64_MAX}};
+/* All valid resource indices, without the bits added by rounding up to words */
+const ucp_tl_bitmap_t ucp_tl_bitmap_max = {{UINT64_MAX, UINT64_MAX, UINT64_MAX,
+                                            UCS_MASK(UCP_MAX_RESOURCES %
+                                                     UCS_BITMAP_BITS_IN_WORD)}};
 const ucp_tl_bitmap_t ucp_tl_bitmap_min = {{0}};
 
 
@@ -1615,7 +1612,7 @@ const char *ucp_tl_bitmap_str(ucp_context_h context,
     p    = str;
     endp = str + max_str_len;
 
-    UCS_STATIC_BITMAP_FOR_EACH_BIT(i, tl_bitmap) {
+    UCP_TL_BITMAP_FOR_EACH_BIT(i, tl_bitmap) {
         ucs_snprintf_zero(p, endp - p, "%s ",
                           context->tl_rscs[i].tl_rsc.tl_name);
         p += strlen(p);
@@ -1777,7 +1774,7 @@ static void ucp_fill_sockaddr_cms_prio_list(ucp_context_h context,
          * sockaddr CMs bitmap. Save the cmpt_idx for the client/server usage
          * later */
         cm_cmpts_bitmap_safe = cm_cmpts_bitmap;
-        UCS_STATIC_BITMAP_FOR_EACH_BIT(cmpt_idx, &cm_cmpts_bitmap_safe) {
+        UCP_TL_BITMAP_FOR_EACH_BIT(cmpt_idx, &cm_cmpts_bitmap_safe) {
             if (!strcmp(sockaddr_cm_names[cm_idx], "*") ||
                 !strncmp(sockaddr_cm_names[cm_idx],
                          context->tl_cmpts[cmpt_idx].attr.name,
@@ -2576,13 +2573,15 @@ static ucs_status_t ucp_fill_config(ucp_context_h context,
     if (context->config.ext.min_rndv_chunk_size == 0) {
         ucs_error("minimum chunk size for rendezvous protocol must be greater"
                   " than 0");
-        return UCS_ERR_INVALID_PARAM;
+        status = UCS_ERR_INVALID_PARAM;
+        goto err_free_config_ext;
     }
 
     if (context->config.ext.min_rma_chunk_size == 0) {
         ucs_error("minimum chunk size for RMA protocol must be greater"
                   " than 0");
-        return UCS_ERR_INVALID_PARAM;
+        status = UCS_ERR_INVALID_PARAM;
+        goto err_free_config_ext;
     }
 
     /* Save environment prefix to later notify user for unused variables */
@@ -2724,7 +2723,7 @@ static ucs_status_t ucp_fill_config(ucp_context_h context,
         !context->config.ext.proto_enable) {
         ucs_error("UCX_FENCE_MODE=ep_based requires UCX_PROTO_ENABLE=y");
         status = UCS_ERR_INVALID_PARAM;
-        goto err_free_key_list;
+        goto err_free_am_mpool_sizes;
     } else if (context->config.ext.fence_mode == UCP_FENCE_MODE_AUTO) {
         if ((context->config.ext.max_rma_lanes > 1) ||
             context->config.ext.proto_enable) {
@@ -2752,6 +2751,8 @@ static ucs_status_t ucp_fill_config(ucp_context_h context,
 
     return UCS_OK;
 
+err_free_am_mpool_sizes:
+    ucs_free(context->config.am_mpools.sizes);
 err_free_key_list:
     ucp_cached_key_list_release(&context->cached_key_list);
 err_free_alloc_methods:
@@ -3290,7 +3291,7 @@ void ucp_context_memaccess_tl_bitmap(ucp_context_h context,
     }
 
     UCS_STATIC_BITMAP_RESET_ALL(tl_bitmap);
-    UCS_STATIC_BITMAP_FOR_EACH_BIT(rsc_index, &context->tl_bitmap) {
+    UCP_TL_BITMAP_FOR_EACH_BIT(rsc_index, &context->tl_bitmap) {
         md_index = context->tl_rscs[rsc_index].md_index;
         md_attr  = &context->tl_mds[md_index].attr;
         if (md_attr->flags & md_reg_flags) {
@@ -3314,7 +3315,7 @@ ucp_context_dev_tl_bitmap(ucp_context_h context, const char *dev_name,
     ucp_rsc_index_t tl_idx;
 
     UCS_STATIC_BITMAP_RESET_ALL(tl_bitmap);
-    UCS_STATIC_BITMAP_FOR_EACH_BIT(tl_idx, &context->tl_bitmap) {
+    UCP_TL_BITMAP_FOR_EACH_BIT(tl_idx, &context->tl_bitmap) {
         if (strcmp(context->tl_rscs[tl_idx].tl_rsc.dev_name, dev_name)) {
             continue;
         }
@@ -3330,7 +3331,7 @@ ucp_context_dev_idx_tl_bitmap(ucp_context_h context, ucp_rsc_index_t dev_idx,
     ucp_rsc_index_t tl_idx;
 
     UCS_STATIC_BITMAP_RESET_ALL(tl_bitmap);
-    UCS_STATIC_BITMAP_FOR_EACH_BIT(tl_idx, &context->tl_bitmap) {
+    UCP_TL_BITMAP_FOR_EACH_BIT(tl_idx, &context->tl_bitmap) {
         if (context->tl_rscs[tl_idx].dev_index == dev_idx) {
             UCS_STATIC_BITMAP_SET(tl_bitmap, tl_idx);
         }
