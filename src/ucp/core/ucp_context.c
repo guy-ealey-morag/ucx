@@ -3182,6 +3182,34 @@ out_release_groups:
     return status;
 }
 
+static int ucp_context_auto_gpu_lanes(ucp_context_h context)
+{
+    ucp_md_map_t net_md_map;
+    ucs_memory_type_t mem_type;
+
+    if (!context->config.ext.proto_enable) {
+        return 0;
+    }
+
+    if (context->gpu_nic_assignment != NULL) {
+        return 1;
+    }
+
+    if (context->config.ext.max_hca_per_gpu == UCS_ULUNITS_INF) {
+        return 0;
+    }
+
+    net_md_map = ucp_context_get_net_md_map(context);
+    ucs_memory_type_for_each(mem_type) {
+        if (UCP_MEM_IS_GPU(mem_type) &&
+            (context->reg_md_map[mem_type] & net_md_map)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static void
 ucp_context_gpu_nic_assignment_cleanup(ucp_gpu_nic_assignment_t *assignment)
 {
@@ -3240,6 +3268,8 @@ ucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_ver
     if (status != UCS_OK) {
         goto err_free_res;
     }
+
+    context->config.auto_gpu_lanes = ucp_context_auto_gpu_lanes(context);
 
     context->uuid             = ucs_generate_uuid((uintptr_t)context);
     context->next_memh_reg_id = 0;

@@ -527,6 +527,11 @@ typedef struct ucp_context {
         /* Indicate whether tracing for used protocol selections is enabled */
         int                       trace_used_proto_selections;
 
+        /* GPU buffers may get an 'auto' lane limit from their NICs: a GPU-NIC
+         * assignment exists, or UCX_MAX_HCA_PER_GPU selects NICs for GPU
+         * memory */
+        int                       auto_gpu_lanes;
+
         struct {
            unsigned               count;
            size_t                 *sizes;
@@ -806,6 +811,13 @@ ucp_context_rndv_is_enabled(ucp_context_h context)
 {
     return (context->config.ext.rndv_intra_thresh != UCS_MEMUNITS_INF) ||
            (context->config.ext.rndv_inter_thresh != UCS_MEMUNITS_INF);
+}
+
+/* Eager multi-lane protocols use AM_BW lanes, so wireup creates them */
+static UCS_F_ALWAYS_INLINE int
+ucp_context_eager_uses_am_bw_lanes(ucp_context_h context)
+{
+    return context->config.ext.max_eager_lanes >= 2;
 }
 
 static UCS_F_ALWAYS_INLINE int

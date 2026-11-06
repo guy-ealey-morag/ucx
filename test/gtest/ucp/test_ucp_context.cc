@@ -300,6 +300,46 @@ UCS_TEST_P(test_ucp_context_max_rails, inf_rejected)
 
 UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_context_max_rails, all, "all")
 
+class test_ucp_context_auto_gpu_lanes : public test_ucp_context {
+public:
+    test_ucp_context_auto_gpu_lanes()
+    {
+        modify_config("GPU_NIC_ASSIGNMENT_MODE", "off");
+    }
+};
+
+UCS_TEST_P(test_ucp_context_auto_gpu_lanes, all_hcas, "MAX_HCA_PER_GPU=inf")
+{
+    EXPECT_FALSE(create_entity()->ucph()->config.auto_gpu_lanes);
+}
+
+UCS_TEST_P(test_ucp_context_auto_gpu_lanes, protocols_v1, "PROTO_ENABLE=n",
+           "MAX_HCA_PER_GPU=auto")
+{
+    EXPECT_FALSE(create_entity()->ucph()->config.auto_gpu_lanes);
+}
+
+UCS_TEST_P(test_ucp_context_auto_gpu_lanes, max_hca_per_gpu,
+           "MAX_HCA_PER_GPU=auto")
+{
+    ucp_context_h context         = create_entity()->ucph();
+    const ucp_md_map_t net_md_map = ucp_context_get_net_md_map(context);
+    bool gpu_net_md               = false;
+
+    for (int mem_type = 0; mem_type < UCS_MEMORY_TYPE_LAST; ++mem_type) {
+        gpu_net_md |= UCP_MEM_IS_GPU(mem_type) &&
+                      (context->reg_md_map[mem_type] & net_md_map);
+    }
+
+    if (!gpu_net_md) {
+        UCS_TEST_SKIP_R("no network memory domain registers GPU memory");
+    }
+
+    EXPECT_TRUE(context->config.auto_gpu_lanes);
+}
+
+UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_context_auto_gpu_lanes, all, "all")
+
 class test_ucp_aliases : public test_ucp_context {
 };
 
