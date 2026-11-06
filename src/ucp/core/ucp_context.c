@@ -251,10 +251,9 @@ static ucs_config_field_t ucp_context_config_table[] = {
 
   {"MAX_RNDV_RAILS", "auto",
    "Maximal number of devices on which a rendezvous operation may be executed in parallel.\n"
-   "For GPU memory, 'auto' lets the get and put rendezvous protocols use the lanes\n"
-   "on the NICs that the GPU-NIC assignment gives the GPU, or on the NICs that\n"
-   "UCX_MAX_HCA_PER_GPU selects. Otherwise it uses UCX_MAX_RNDV_RAILS_FALLBACK.\n"
-   "'inf' uses the maximal number of lanes.",
+   "For GPU memory, 'auto' uses the lanes on the NICs that the GPU-NIC assignment\n"
+   "gives the GPU, or on the NICs that UCX_MAX_HCA_PER_GPU selects. Otherwise it\n"
+   "uses UCX_MAX_RNDV_RAILS_FALLBACK. 'inf' uses the maximal number of lanes.",
    ucs_offsetof(ucp_context_config_t, max_rndv_lanes_config),
    UCS_CONFIG_TYPE_ULUNITS},
 
@@ -3162,6 +3161,34 @@ out_release_groups:
     return status;
 }
 
+static int ucp_context_auto_gpu_lanes(ucp_context_h context)
+{
+    ucp_md_map_t net_md_map;
+    ucs_memory_type_t mem_type;
+
+    if (!context->config.ext.proto_enable) {
+        return 0;
+    }
+
+    if (context->gpu_nic_assignment != NULL) {
+        return 1;
+    }
+
+    if (context->config.ext.max_hca_per_gpu == UCS_ULUNITS_INF) {
+        return 0;
+    }
+
+    net_md_map = ucp_context_get_net_md_map(context);
+    ucs_memory_type_for_each(mem_type) {
+        if (UCP_MEM_IS_GPU(mem_type) &&
+            (context->reg_md_map[mem_type] & net_md_map)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static void
 ucp_context_gpu_nic_assignment_cleanup(ucp_gpu_nic_assignment_t *assignment)
 {
@@ -3220,6 +3247,8 @@ ucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_ver
     if (status != UCS_OK) {
         goto err_free_res;
     }
+
+    context->config.auto_gpu_lanes = ucp_context_auto_gpu_lanes(context);
 
     context->uuid             = ucs_generate_uuid((uintptr_t)context);
     context->next_memh_reg_id = 0;
