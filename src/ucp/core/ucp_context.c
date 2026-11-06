@@ -251,14 +251,23 @@ static ucs_config_field_t ucp_context_config_table[] = {
 
   {"MAX_RNDV_RAILS", "auto",
    "Maximal number of devices on which a rendezvous operation may be executed in parallel.\n"
-   " - auto : use UCX_MAX_RNDV_RAILS_FALLBACK.\n"
+   " - auto : for host memory, use UCX_MAX_RNDV_RAILS_FALLBACK.\n"
+   "          for GPU memory:\n"
+   "           - with NICs assigned by UCX_GPU_NIC_ASSIGNMENT_MODE, use the\n"
+   "             lanes on those NICs.\n"
+   "           - without assigned NICs:\n"
+   "              - when UCX_MAX_HCA_PER_GPU is 'auto' or a number, use the\n"
+   "                lanes on the HCAs it selects.\n"
+   "              - when UCX_MAX_HCA_PER_GPU is 'inf', use\n"
+   "                UCX_MAX_RNDV_RAILS_FALLBACK.\n"
    " - <N>  : use up to N devices.",
    ucs_offsetof(ucp_context_config_t, max_rndv_lanes_config),
    UCS_CONFIG_TYPE_ULUNITS},
 
   {"MAX_RNDV_RAILS_FALLBACK", "2",
    "Maximal number of devices for a rendezvous operation when UCX_MAX_RNDV_RAILS\n"
-   "is 'auto'. Ignored when UCX_MAX_RNDV_RAILS is a number.",
+   "is 'auto' and selects no NICs for the memory (see UCX_MAX_RNDV_RAILS), and\n"
+   "for protocols v1. Ignored when UCX_MAX_RNDV_RAILS is a number.",
    ucs_offsetof(ucp_context_config_t, max_rndv_lanes_fallback),
    UCS_CONFIG_TYPE_UINT},
 
@@ -268,14 +277,23 @@ static ucs_config_field_t ucp_context_config_table[] = {
 
   {"MAX_RMA_RAILS", "auto",
    "Maximal number of devices on which a RMA operation may be executed in parallel.\n"
-   " - auto : use UCX_MAX_RMA_RAILS_FALLBACK.\n"
+   " - auto : for host memory, use UCX_MAX_RMA_RAILS_FALLBACK.\n"
+   "          for GPU memory:\n"
+   "           - with NICs assigned by UCX_GPU_NIC_ASSIGNMENT_MODE, use the\n"
+   "             lanes on those NICs.\n"
+   "           - without assigned NICs:\n"
+   "              - when UCX_MAX_HCA_PER_GPU is 'auto' or a number, use the\n"
+   "                lanes on the HCAs it selects.\n"
+   "              - when UCX_MAX_HCA_PER_GPU is 'inf', use\n"
+   "                UCX_MAX_RMA_RAILS_FALLBACK.\n"
    " - <N>  : use up to N devices.",
    ucs_offsetof(ucp_context_config_t, max_rma_lanes_config),
    UCS_CONFIG_TYPE_ULUNITS},
 
   {"MAX_RMA_RAILS_FALLBACK", "1",
    "Maximal number of devices for a RMA operation when UCX_MAX_RMA_RAILS is\n"
-   "'auto'. Ignored when UCX_MAX_RMA_RAILS is a number.",
+   "'auto' and selects no NICs for the memory (see UCX_MAX_RMA_RAILS), and for\n"
+   "protocols v1. Ignored when UCX_MAX_RMA_RAILS is a number.",
    ucs_offsetof(ucp_context_config_t, max_rma_lanes_fallback),
    UCS_CONFIG_TYPE_UINT},
 
@@ -727,7 +745,9 @@ static ucs_config_field_t ucp_context_config_table[] = {
    "Maximum number of HCAs to register GPU memory on.\n"
    " - inf  : register on all HCAs (default).\n"
    " - auto : register only on HCAs closest to the GPU.\n"
-   " - <N>  : register on up to N closest HCAs.",
+   " - <N>  : register on up to N closest HCAs.\n"
+   "When UCX_GPU_NIC_ASSIGNMENT_MODE assigns no NICs to the GPU, 'auto' or <N>\n"
+   "also restrict the 'auto' rail limits to these HCAs.",
    ucs_offsetof(ucp_context_config_t, max_hca_per_gpu),
    UCS_CONFIG_TYPE_ULUNITS},
 

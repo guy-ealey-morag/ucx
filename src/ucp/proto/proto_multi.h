@@ -120,6 +120,10 @@ typedef struct {
     /* Maximal number of lanes to select */
     ucp_lane_index_t               max_lanes;
 
+    /* The lane limit is configured as 'auto': derive it from the NICs of the
+     * GPU that owns the buffer, and use max_lanes when there are none */
+    int                            auto_lanes;
+
     /* Minimal chunk size. It defines the minimal size of the fragment to split into
      * several parts. The goal is to not split below this limit */
     size_t                         min_chunk;
