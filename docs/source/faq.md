@@ -256,7 +256,9 @@ and NUMA locality.
 
 #### Is it possible to use more than 2 rails?
 
-Yes, by setting `UCX_MAX_RNDV_RAILS=<num-rails>`. Currently up to 4 are supported.
+Yes, by setting `UCX_MAX_RNDV_RAILS=<num-rails>`. Up to 64 are supported.
+With the default `auto`, GPU buffers use the NICs of the GPU-NIC assignment or
+of `UCX_MAX_HCA_PER_GPU`, and other buffers use `UCX_MAX_RNDV_RAILS_FALLBACK`.
 
 #### Is it possible that each process would just use the closest device?
 
