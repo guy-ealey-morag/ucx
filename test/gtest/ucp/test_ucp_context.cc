@@ -241,6 +241,71 @@ UCS_TEST_P(test_ucp_context_max_rails, max_rails_at_limit)
     EXPECT_EQ(max_lanes, e->ucph()->config.ext.max_rma_lanes);
 }
 
+UCS_TEST_P(test_ucp_context_max_rails, max_rndv_rails_fallback_above_limit)
+{
+    expect_init_rejected("MAX_RNDV_RAILS_FALLBACK");
+}
+
+UCS_TEST_P(test_ucp_context_max_rails, max_rma_rails_fallback_above_limit)
+{
+    expect_init_rejected("MAX_RMA_RAILS_FALLBACK");
+}
+
+UCS_TEST_P(test_ucp_context_max_rails, auto_by_default)
+{
+    const ucp_context_config_t &config = create_entity()->ucph()->config.ext;
+
+    EXPECT_EQ(UCS_ULUNITS_AUTO, config.max_rndv_lanes_config);
+    EXPECT_EQ(UCS_ULUNITS_AUTO, config.max_rma_lanes_config);
+    EXPECT_EQ(config.max_rndv_lanes_fallback, config.max_rndv_lanes);
+    EXPECT_EQ(config.max_rma_lanes_fallback, config.max_rma_lanes);
+}
+
+UCS_TEST_P(test_ucp_context_max_rails, auto_uses_fallback)
+{
+    modify_config("MAX_RNDV_RAILS_FALLBACK", "3");
+    modify_config("MAX_RMA_RAILS_FALLBACK", "2");
+
+    const ucp_context_config_t &config = create_entity()->ucph()->config.ext;
+
+    EXPECT_EQ(3u, config.max_rndv_lanes);
+    EXPECT_EQ(2u, config.max_rma_lanes);
+}
+
+UCS_TEST_P(test_ucp_context_max_rails, explicit_value_ignores_fallback)
+{
+    modify_config("MAX_RMA_RAILS", "3");
+    modify_config("MAX_RMA_RAILS_FALLBACK", "2");
+
+    const ucp_context_config_t &config = create_entity()->ucph()->config.ext;
+
+    EXPECT_EQ(3ul, config.max_rma_lanes_config);
+    EXPECT_EQ(3u, config.max_rma_lanes);
+}
+
+UCS_TEST_P(test_ucp_context_max_rails, explicit_value_ignores_invalid_fallback)
+{
+    modify_config("MAX_RMA_RAILS", "2");
+    modify_config("MAX_RMA_RAILS_FALLBACK", std::to_string(UCP_MAX_LANES + 1));
+
+    const ucp_context_config_t &config = create_entity()->ucph()->config.ext;
+
+    EXPECT_EQ(2u, config.max_rma_lanes);
+}
+
+UCS_TEST_P(test_ucp_context_max_rails, inf_uses_max_lanes)
+{
+    const unsigned max_lanes = UCP_MAX_LANES;
+
+    modify_config("MAX_RNDV_RAILS", "inf");
+    modify_config("MAX_RMA_RAILS", "inf");
+
+    const ucp_context_config_t &config = create_entity()->ucph()->config.ext;
+
+    EXPECT_EQ(max_lanes, config.max_rndv_lanes);
+    EXPECT_EQ(max_lanes, config.max_rma_lanes);
+}
+
 UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_context_max_rails, all, "all")
 
 class test_ucp_aliases : public test_ucp_context {
