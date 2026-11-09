@@ -113,8 +113,13 @@ TEST(test_ib_md_device_spec, fw_ver)
         const char       *name;
     };
     static const spec_test tests[] =
-            {{{0x15b3, 0x101e}, "82.48.1688", "ConnectX-9 VF"},
-             {{0x15b3, 0x101e}, "22.47.1026", "MLX5 VF"},
+            {{{0x15b3, 0x101e}, "26.47.1026", "ConnectX-6 LX VF"},
+             {{0x15b3, 0x101e}, "28.48.1000", "ConnectX-7 VF"},
+             {{0x15b3, 0x101e}, "40.50.0446", "ConnectX-8 VF"},
+             {{0x15b3, 0x101e}, "82.48.1688", "ConnectX-9 VF"},
+             {{0x15b3, 0x101e}, "24.43.2402", "BlueField 2 VF"},
+             {{0x15b3, 0x101e}, "32.43.2402", "BlueField 3 VF"},
+             {{0x15b3, 0x101e}, "22.47.1026", "ConnectX-6 DX VF"},
              {{0x15b3, 0x101e}, "99.48.1000", "MLX5 VF"},
              {{0x15b3, 0x101e}, "", "MLX5 VF"},
              {{0x15b3, 0x1021}, "82.48.1688", "ConnectX-7"}};
