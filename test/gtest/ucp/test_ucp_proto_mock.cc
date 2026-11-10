@@ -3622,10 +3622,25 @@ UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_auto_rails,
 }
 
 UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_auto_rails,
-           no_assignment_uses_fallback)
+           no_assignment_uses_fallback, "MAX_HCA_PER_GPU=inf")
 {
     expect_rma_lanes(mapped_gpu(), 1);
     expect_rndv_lanes(UCS_MEMORY_TYPE_CUDA, mapped_gpu(), 2);
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_auto_rails,
+           no_assignment_uses_max_hca_per_gpu, "MAX_HCA_PER_GPU=auto")
+{
+    /* All mock NICs share one memory domain, so the closest-MD selection
+     * keeps all of them */
+    expect_rma_lanes(mapped_gpu(), 3);
+    expect_rndv_lanes(UCS_MEMORY_TYPE_CUDA, mapped_gpu(), 3);
+}
+
+UCS_TEST_P(test_ucp_proto_mock_rcx_gpu_nic_auto_rails,
+           max_hca_per_gpu_skips_host_memory, "MAX_HCA_PER_GPU=auto")
+{
+    expect_host_rma_lanes(1);
 }
 
 UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_proto_mock_rcx_gpu_nic_auto_rails, rcx,

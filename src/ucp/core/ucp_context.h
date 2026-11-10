@@ -528,7 +528,8 @@ typedef struct ucp_context {
         int                       trace_used_proto_selections;
 
         /* Indicate whether GPU buffers may get an 'auto' rail limit based on
-         * their GPU's NICs */
+         * their GPU's NICs, which needs a GPU-NIC assignment or
+         * UCX_MAX_HCA_PER_GPU selecting NICs for GPU memory */
         int                       auto_gpu_lanes;
 
         struct {

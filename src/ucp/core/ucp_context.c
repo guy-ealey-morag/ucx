@@ -256,7 +256,11 @@ static ucs_config_field_t ucp_context_config_table[] = {
    "          for GPU memory:\n"
    "           - with NICs assigned by UCX_GPU_NIC_ASSIGNMENT_MODE, use the\n"
    "             lanes on those NICs.\n"
-   "           - without assigned NICs, use UCX_MAX_RNDV_RAILS_FALLBACK.\n"
+   "           - without assigned NICs:\n"
+   "              - when UCX_MAX_HCA_PER_GPU is 'auto' or a number, use the\n"
+   "                lanes on the HCAs it selects.\n"
+   "              - when UCX_MAX_HCA_PER_GPU is 'inf', use\n"
+   "                UCX_MAX_RNDV_RAILS_FALLBACK.\n"
    " - <N>  : use up to N devices.",
    ucs_offsetof(ucp_context_config_t, max_rndv_lanes_config),
    UCS_CONFIG_TYPE_ULUNITS},
@@ -280,7 +284,11 @@ static ucs_config_field_t ucp_context_config_table[] = {
    "          for GPU memory:\n"
    "           - with NICs assigned by UCX_GPU_NIC_ASSIGNMENT_MODE, use the\n"
    "             lanes on those NICs.\n"
-   "           - without assigned NICs, use UCX_MAX_RMA_RAILS_FALLBACK.\n"
+   "           - without assigned NICs:\n"
+   "              - when UCX_MAX_HCA_PER_GPU is 'auto' or a number, use the\n"
+   "                lanes on the HCAs it selects.\n"
+   "              - when UCX_MAX_HCA_PER_GPU is 'inf', use\n"
+   "                UCX_MAX_RMA_RAILS_FALLBACK.\n"
    " - <N>  : use up to N devices.",
    ucs_offsetof(ucp_context_config_t, max_rma_lanes_config),
    UCS_CONFIG_TYPE_ULUNITS},
@@ -740,7 +748,9 @@ static ucs_config_field_t ucp_context_config_table[] = {
    "Maximum number of HCAs to register GPU memory on.\n"
    " - inf  : register on all HCAs (default).\n"
    " - auto : register only on HCAs closest to the GPU.\n"
-   " - <N>  : register on up to N closest HCAs.",
+   " - <N>  : register on up to N closest HCAs.\n"
+   "When UCX_GPU_NIC_ASSIGNMENT_MODE assigns no NICs to the GPU, 'auto' or <N>\n"
+   "also restrict the 'auto' rail limits to these HCAs.",
    ucs_offsetof(ucp_context_config_t, max_hca_per_gpu),
    UCS_CONFIG_TYPE_ULUNITS},
 
@@ -3175,6 +3185,34 @@ out_release_groups:
     return status;
 }
 
+static int ucp_context_auto_gpu_lanes(ucp_context_h context)
+{
+    ucp_md_map_t net_md_map;
+    ucs_memory_type_t mem_type;
+
+    if (!context->config.ext.proto_enable) {
+        return 0;
+    }
+
+    if (context->gpu_nic_assignment != NULL) {
+        return 1;
+    }
+
+    if (context->config.ext.max_hca_per_gpu == UCS_ULUNITS_INF) {
+        return 0;
+    }
+
+    net_md_map = ucp_context_get_net_md_map(context);
+    ucs_memory_type_for_each(mem_type) {
+        if (UCP_MEM_IS_GPU(mem_type) &&
+            (context->reg_md_map[mem_type] & net_md_map)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static void
 ucp_context_gpu_nic_assignment_cleanup(ucp_gpu_nic_assignment_t *assignment)
 {
@@ -3234,7 +3272,7 @@ ucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_ver
         goto err_free_res;
     }
 
-    context->config.auto_gpu_lanes = (context->gpu_nic_assignment != NULL);
+    context->config.auto_gpu_lanes = ucp_context_auto_gpu_lanes(context);
 
     context->uuid             = ucs_generate_uuid((uintptr_t)context);
     context->next_memh_reg_id = 0;
