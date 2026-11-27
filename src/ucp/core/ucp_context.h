@@ -480,6 +480,9 @@ typedef struct ucp_context {
     /* GPU-to-NIC assignment, set to NULL when not in use */
     ucp_gpu_nic_assignment_t      *gpu_nic_assignment;
 
+    /* Whether UCX_MAX_HCA_PER_GPU was logged to exclude assigned NICs */
+    volatile uint32_t             reg_policy_logged;
+
     /* Mem handle registration cache */
     ucs_rcache_t                  *rcache;
 
@@ -865,6 +868,12 @@ ucp_md_map_t ucp_context_select_reg_mds(ucp_context_h context,
 
 
 ucp_md_map_t ucp_context_get_net_md_map(ucp_context_h context);
+
+
+/* Returns the MDs in md_map that have a device in the device_bitmap */
+ucp_md_map_t
+ucp_context_get_sys_devs_md_map(ucp_context_h context, ucp_md_map_t md_map,
+                                const ucs_sys_device_bitmap_t *device_bitmap);
 
 
 ucs_status_t

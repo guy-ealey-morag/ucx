@@ -2056,6 +2056,34 @@ ucp_reg_select_md_cmp(const void *pa, const void *pb, void *UCS_V_UNUSED arg)
     return strcmp(a->name, b->name);
 }
 
+/* Returns the system devices that belong to the memory domain */
+static ucp_sys_dev_map_t
+ucp_context_md_sys_dev_map(ucp_context_h context, ucp_md_index_t md_index)
+{
+    ucp_sys_dev_map_t sys_dev_map = 0;
+    const ucp_tl_resource_desc_t *rsc;
+
+    ucs_carray_for_each(rsc, context->tl_rscs, context->num_tls) {
+        if (rsc->md_index != md_index) {
+            continue;
+        }
+
+        if (rsc->tl_rsc.sys_device >= UCP_MAX_SYS_DEVICES) {
+            continue;
+        }
+
+        /* TODO: rc_gda has the gpu in the sys_dev_map so we need to skip it.
+         * This should be fixed in the tl. */
+        if (strncmp(rsc->tl_rsc.dev_name, "cuda", 4) == 0) {
+            continue;
+        }
+
+        sys_dev_map |= UCS_BIT(rsc->tl_rsc.sys_device);
+    }
+
+    return sys_dev_map;
+}
+
 ucp_md_map_t ucp_context_select_reg_mds(ucp_context_h context,
                                         ucp_md_map_t md_map,
                                         ucs_sys_device_t mem_sys_dev)
@@ -2069,7 +2097,6 @@ ucp_md_map_t ucp_context_select_reg_mds(ucp_context_h context,
     ucs_sys_device_t sys_dev;
     unsigned select_count, i;
     ucp_md_index_t md_index;
-    ucp_rsc_index_t tl_idx;
     int reachable;
 
     if (ucp_reg_devices_mode(config->max_hca_per_gpu) == UCP_REG_DEVICES_ALL) {
@@ -2077,20 +2104,7 @@ ucp_md_map_t ucp_context_select_reg_mds(ucp_context_h context,
     }
 
     ucs_for_each_bit(md_index, md_map) {
-        /* TODO: rc_gda has the gpu in the sys_dev_map so we need to skip it.
-         * This should be fixed in the tl. */
-        sys_dev_map = 0;
-        for (tl_idx = 0; tl_idx < context->num_tls; tl_idx++) {
-            if ((context->tl_rscs[tl_idx].md_index == md_index) &&
-                (context->tl_rscs[tl_idx].tl_rsc.sys_device <
-                 UCP_MAX_SYS_DEVICES) &&
-                (strncmp(context->tl_rscs[tl_idx].tl_rsc.dev_name,
-                         "cuda", 4) != 0)) {
-                sys_dev_map |=
-                    UCS_BIT(context->tl_rscs[tl_idx].tl_rsc.sys_device);
-            }
-        }
-
+        sys_dev_map    = ucp_context_md_sys_dev_map(context, md_index);
         best.latency   = UCS_INFINITY;
         best.bandwidth = 0;
         reachable      = 1;
@@ -2171,6 +2185,29 @@ ucp_md_map_t ucp_context_get_net_md_map(ucp_context_h context)
     }
 
     return net_md_map;
+}
+
+/* Returns the MDs in md_map that have a system device in device_bitmap */
+ucp_md_map_t
+ucp_context_get_sys_devs_md_map(ucp_context_h context, ucp_md_map_t md_map,
+                                const ucs_sys_device_bitmap_t *device_bitmap)
+{
+    ucp_md_map_t matching_md_map = 0;
+    ucp_sys_dev_map_t sys_dev_map;
+    ucs_sys_device_t sys_dev;
+    ucp_md_index_t md_index;
+
+    ucs_for_each_bit(md_index, md_map) {
+        sys_dev_map = ucp_context_md_sys_dev_map(context, md_index);
+        ucs_for_each_bit(sys_dev, sys_dev_map) {
+            if (ucp_gpu_nic_bitmap_get(device_bitmap, sys_dev)) {
+                matching_md_map |= UCS_BIT(md_index);
+                break;
+            }
+        }
+    }
+
+    return matching_md_map;
 }
 
 static void ucp_fill_resources_reg_md_map_update(ucp_context_h context)

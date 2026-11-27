@@ -10,6 +10,7 @@
 
 extern "C" {
 #include <ucp/core/ucp_context.h>
+#include <ucp/core/ucp_gpu_nic_assignment.h>
 #include <ucp/core/ucp_mm.h>
 #include <ucp/core/ucp_rkey.h>
 #include <ucp/core/ucp_ep.inl>
@@ -1725,7 +1726,132 @@ public:
 
 protected:
     void test_limits_memh_md_map(ucs_memory_type_t mem_type);
+
+    /* Returns the MDs of the memh's assigned NICs that can register CUDA
+     * memory but are missing from the memh */
+    static ucp_md_map_t
+    unregistered_assigned_md_map(ucp_context_h ucph, ucp_mem_h memh)
+    {
+        const ucp_md_map_t reg_md_map = ucph->reg_md_map[UCS_MEMORY_TYPE_CUDA];
+        const ucs_sys_device_bitmap_t *nic_sys_dev_bitmap =
+                ucp_gpu_nic_assignment_lookup(ucph->gpu_nic_assignment,
+                                              memh->sys_dev);
+        ucp_md_map_t assigned_md_map = 0;
+        const ucp_tl_resource_desc_t *rsc;
+
+        if (nic_sys_dev_bitmap == nullptr) {
+            return 0;
+        }
+
+        ucs_carray_for_each(rsc, ucph->tl_rscs, ucph->num_tls) {
+            if ((rsc->tl_rsc.dev_type == UCT_DEVICE_TYPE_NET) &&
+                UCS_BIT_GET(reg_md_map, rsc->md_index) &&
+                ucp_gpu_nic_bitmap_get(nic_sys_dev_bitmap,
+                                       rsc->tl_rsc.sys_device)) {
+                assigned_md_map |= UCS_BIT(rsc->md_index);
+            }
+        }
+
+        return assigned_md_map & ~memh->md_map;
+    }
+
+    /* Collects the diag messages about assigned NICs that
+     * UCX_MAX_HCA_PER_GPU excludes in m_reg_policy_messages */
+    static ucs_log_func_rc_t
+    reg_policy_logger(const char *file, unsigned line, const char *function,
+                      ucs_log_level_t level,
+                      const ucs_log_component_config_t *comp_conf,
+                      const char *message, va_list ap)
+    {
+        if (strstr(message, "excludes nics") == NULL) {
+            return UCS_LOG_FUNC_RC_CONTINUE;
+        }
+
+        return common_logger(UCS_LOG_LEVEL_DIAG, false, m_reg_policy_messages,
+                             std::numeric_limits<size_t>::max(), file, line,
+                             function, level, comp_conf, message, ap);
+    }
+
+    /* Maps a CUDA buffer of the current device twice, collecting the diag
+     * messages, and counts it if the memh misses assigned NICs */
+    void map_cuda_buffer(ucp_context_h ucph, size_t *num_missing_p)
+    {
+        const mem_buffer buffer(4096, UCS_MEMORY_TYPE_CUDA);
+        ucp_mem_map_params_t params;
+        ucp_mem_h memhs[2];
+
+        params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
+                            UCP_MEM_MAP_PARAM_FIELD_LENGTH;
+        params.address    = buffer.ptr();
+        params.length     = buffer.size();
+
+        {
+            const ucs::scoped_log_level enable_diag(UCS_LOG_LEVEL_DIAG);
+            const scoped_log_handler slh(reg_policy_logger);
+            for (ucp_mem_h &memh : memhs) {
+                ASSERT_UCS_OK(ucp_mem_map(ucph, &params, &memh));
+            }
+        }
+
+        if (unregistered_assigned_md_map(ucph, memhs[0]) != 0) {
+            ++(*num_missing_p);
+        }
+
+        for (ucp_mem_h memh : memhs) {
+            ASSERT_UCS_OK(ucp_mem_unmap(ucph, memh));
+        }
+    }
+
+    /* Creates a context with the flip assignment and the given
+     * UCX_MAX_HCA_PER_GPU, and skips the test if no assignment is built */
+    void create_assigned_context(const char *max_hca_per_gpu,
+                                 ucs::handle<ucp_context_h> &context)
+    {
+        ucs::handle<ucp_config_t*> config;
+        ucp_context_h ucph;
+        ucs_status_t status;
+
+        UCS_TEST_CREATE_HANDLE(ucp_config_t*, config, ucp_config_release,
+                               ucp_config_read, NULL, NULL);
+        ASSERT_UCS_OK(ucp_config_modify(config.get(), "GPU_NIC_ASSIGNMENT_MODE",
+                                        "flip"));
+        ASSERT_UCS_OK(ucp_config_modify(config.get(), "MAX_HCA_PER_GPU",
+                                        max_hca_per_gpu));
+
+        {
+            const scoped_log_handler slh(hide_errors_logger);
+            status = ucp_init(&get_variant_ctx_params(), config.get(), &ucph);
+        }
+
+        if (status == UCS_ERR_INVALID_PARAM) {
+            UCS_TEST_SKIP_R("gpu-nic assignment is unavailable on this host");
+        }
+
+        ASSERT_UCS_OK(status);
+        context.reset(ucph, ucp_cleanup);
+        if (ucph->gpu_nic_assignment == nullptr) {
+            UCS_TEST_SKIP_R("no gpu-nic assignment on this host");
+        }
+    }
+
+    /* Maps a CUDA buffer on every GPU, collecting the diag messages, and
+     * counts the buffers that miss assigned NICs */
+    void map_gpu_buffers(ucp_context_h ucph, size_t *num_missing_p)
+    {
+        const scoped_cuda_device device_guard;
+
+        *num_missing_p = 0;
+        m_reg_policy_messages.clear();
+        for (int gpu = 0; gpu < mem_buffer::get_device_count(); ++gpu) {
+            mem_buffer::set_device(gpu);
+            ASSERT_NO_FATAL_FAILURE(map_cuda_buffer(ucph, num_missing_p));
+        }
+    }
+
+    static std::vector<std::string> m_reg_policy_messages;
 };
+
+std::vector<std::string> test_ucp_mmap_max_hca::m_reg_policy_messages;
 
 void test_ucp_mmap_max_hca::test_limits_memh_md_map(ucs_memory_type_t mem_type)
 {
@@ -1849,6 +1975,31 @@ UCS_TEST_P(test_ucp_mmap_max_hca, limits_per_gpu)
         ASSERT_UCS_OK(ucp_mem_unmap(ctx, memh));
         mem_buffer::release(ptr, UCS_MEMORY_TYPE_CUDA);
     }
+}
+
+UCS_TEST_P(test_ucp_mmap_max_hca, logs_excluded_assigned_nics) {
+    ucs::handle<ucp_context_h> context;
+    size_t num_missing = 0;
+
+    if (!mem_buffer::is_mem_type_supported(UCS_MEMORY_TYPE_CUDA)) {
+        UCS_TEST_SKIP_R("CUDA is not supported");
+    }
+
+    /* Registering on every NIC never excludes an assigned one */
+    ASSERT_NO_FATAL_FAILURE(create_assigned_context("inf", context));
+    ASSERT_NO_FATAL_FAILURE(map_gpu_buffers(context.get(), &num_missing));
+    EXPECT_EQ(0u, num_missing);
+    EXPECT_EQ(0u, m_reg_policy_messages.size());
+
+    ASSERT_NO_FATAL_FAILURE(create_assigned_context("1", context));
+    ASSERT_NO_FATAL_FAILURE(map_gpu_buffers(context.get(), &num_missing));
+    if (num_missing == 0) {
+        UCS_TEST_SKIP_R("every gpu buffer is registered on all its assigned "
+                        "nics with UCX_MAX_HCA_PER_GPU=1");
+    }
+
+    /* One message per context, however many buffers miss assigned NICs */
+    EXPECT_EQ(1u, m_reg_policy_messages.size());
 }
 
 UCP_INSTANTIATE_TEST_CASE_TLS(test_ucp_mmap_max_hca, all, "all")

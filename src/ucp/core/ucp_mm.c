@@ -10,9 +10,11 @@
 
 #include "ucp_mm.h"
 #include "ucp_context.h"
+#include "ucp_gpu_nic_assignment.h"
 #include "ucp_worker.h"
 #include "ucp_mm.inl"
 
+#include <ucs/arch/atomic.h>
 #include <ucs/debug/log.h>
 #include <ucs/debug/memtrack_int.h>
 #include <ucs/sys/math.h>
@@ -936,6 +938,49 @@ ucp_memh_init_from_parent(ucp_mem_h memh, ucp_md_map_t parent_md_map)
     }
 }
 
+/* Logs once per context if the policy excludes NICs assigned to the GPU */
+static void ucp_memh_log_reg_policy(ucp_context_h context,
+                                    ucs_sys_device_t gpu_sys_dev,
+                                    ucp_md_map_t policy_md_map,
+                                    ucp_md_map_t selected_md_map)
+{
+    ucp_md_map_t excluded_md_map = policy_md_map & ~selected_md_map;
+    UCS_STRING_BUFFER_ONSTACK(strb, 256);
+    const ucs_sys_device_bitmap_t *nic_sys_dev_bitmap;
+    ucp_md_map_t excluded_assigned_md_map;
+    ucp_md_index_t md_index;
+
+    if (!ucs_log_is_enabled(UCS_LOG_LEVEL_DIAG) || (excluded_md_map == 0) ||
+        (context->gpu_nic_assignment == NULL) || context->reg_policy_logged) {
+        return;
+    }
+
+    nic_sys_dev_bitmap = ucp_gpu_nic_assignment_lookup(
+            context->gpu_nic_assignment, gpu_sys_dev);
+    if (nic_sys_dev_bitmap == NULL) {
+        return;
+    }
+
+    excluded_assigned_md_map = ucp_context_get_sys_devs_md_map(
+            context, excluded_md_map, nic_sys_dev_bitmap);
+    if ((excluded_assigned_md_map == 0) ||
+        (ucs_atomic_cswap32(&context->reg_policy_logged, 0, 1) != 0)) {
+        return;
+    }
+
+    ucs_for_each_bit(md_index, excluded_assigned_md_map) {
+        ucs_string_buffer_appendf(&strb, "%s, ",
+                                  context->tl_mds[md_index].rsc.md_name);
+    }
+    ucs_string_buffer_rtrim(&strb, ", ");
+
+    ucs_diag("nics [%s] are excluded from memory registration while being "
+             "assigned to gpu %s (sys_dev %d), consider changing the value of "
+             "UCX_MAX_HCA_PER_GPU",
+             ucs_string_buffer_cstr(&strb),
+             ucs_topo_sys_device_get_name(gpu_sys_dev), gpu_sys_dev);
+}
+
 /* Apply UCX_MAX_HCA_PER_GPU policy.
  * The network MDs are ranked by distance (latency, then bandwidth) to the
  * buffer's sys_dev and the closest N selected. */
@@ -955,6 +1000,8 @@ ucp_memh_apply_reg_policy(ucp_context_h context, ucp_mem_h memh,
     policy_md_map = reg_md_map & net_md_map;
     selected      = ucp_context_select_reg_mds(context, policy_md_map,
                                                memh->sys_dev);
+
+    ucp_memh_log_reg_policy(context, memh->sys_dev, policy_md_map, selected);
 
     if (ucs_log_is_enabled(UCS_LOG_LEVEL_TRACE)) {
         UCS_STRING_BUFFER_ONSTACK(strb, 256);
