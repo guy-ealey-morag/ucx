@@ -10,6 +10,7 @@
 #include "ucp_types.h"
 
 #include <ucs/datastruct/static_bitmap.h>
+#include <ucs/datastruct/string_buffer.h>
 #include <ucs/sys/topo/base/topo_groups.h>
 
 #include <stddef.h>
@@ -74,6 +75,21 @@ ucp_gpu_nic_assignment_build(const ucs_topo_groups_t *groups,
 const ucs_sys_device_bitmap_t *
 ucp_gpu_nic_assignment_lookup(const ucp_gpu_nic_assignment_t *assignment,
                               ucs_sys_device_t gpu_sys_dev);
+
+
+/**
+ * Find the GPUs usable by this process that are assigned no NICs.
+ *
+ * @param [in]    assignment  Assignment built from @a groups.
+ * @param [in]    groups      Topology groups the assignment was built from.
+ * @param [inout] strb        String buffer to append the found GPUs to.
+ *
+ * @return Number of found GPUs. GPUs that are not visible to this process
+ *         (e.g. hidden by CUDA_VISIBLE_DEVICES) are not counted.
+ */
+size_t ucp_gpu_nic_assignment_find_gpus_without_nics(
+        const ucp_gpu_nic_assignment_t *assignment,
+        const ucs_topo_groups_t *groups, ucs_string_buffer_t *strb);
 
 
 /**

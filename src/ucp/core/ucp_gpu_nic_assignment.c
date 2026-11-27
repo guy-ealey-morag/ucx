@@ -174,6 +174,39 @@ ucp_gpu_nic_assignment_append_nic(const ucs_topo_group_element_t *nic,
                                    nic->num_sys_devs);
 }
 
+/* Appends the names, BDF and system devices of the GPU */
+static void
+ucp_gpu_nic_assignment_append_gpu(const ucs_topo_group_element_t *gpu,
+                                  ucs_string_buffer_t *strb)
+{
+    char bdf_name[UCS_SYS_BDF_NAME_MAX];
+
+    ucp_gpu_nic_assignment_append_device_names(gpu, strb);
+    ucs_string_buffer_appendf(strb, " (bdf %s sys_dev ",
+                              ucs_topo_sys_device_bdf_name(gpu->sys_devs[0],
+                                                           bdf_name,
+                                                           sizeof(bdf_name)));
+    ucs_string_buffer_append_array(strb, "/", "%hhu", gpu->sys_devs,
+                                   gpu->num_sys_devs);
+    ucs_string_buffer_appendf(strb, ")");
+}
+
+/* Returns whether CUDA sees the GPU; NVML-only GPUs have no user value */
+static int
+ucp_gpu_nic_assignment_gpu_is_visible(const ucs_topo_group_element_t *gpu)
+{
+    const ucs_sys_device_t *gpu_sys_dev;
+
+    ucs_carray_for_each(gpu_sys_dev, gpu->sys_devs, gpu->num_sys_devs) {
+        if (ucs_topo_sys_device_get_user_value(*gpu_sys_dev) !=
+            UCS_SYS_DEVICE_USER_VALUE_EMPTY) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static void
 ucp_gpu_nic_assignment_log_gpu(const ucp_gpu_nic_assignment_t *assignment,
                                const ucs_topo_group_t *group,
@@ -182,7 +215,6 @@ ucp_gpu_nic_assignment_log_gpu(const ucp_gpu_nic_assignment_t *assignment,
 {
     UCS_STRING_BUFFER_ONSTACK(gpu_strb, 128);
     UCP_GPU_NIC_STRING_BUFFERS_ONSTACK(nic_strbs, 256);
-    char bdf_name[UCS_SYS_BDF_NAME_MAX];
     const ucs_sys_device_bitmap_t *nic_sys_dev_bitmap;
     const ucs_topo_group_element_t *nic;
 
@@ -194,15 +226,7 @@ ucp_gpu_nic_assignment_log_gpu(const ucp_gpu_nic_assignment_t *assignment,
     ucs_assert(nic_sys_dev_bitmap != NULL);
     UCS_STATIC_BITMAP_OR_INPLACE(assigned_nics, *nic_sys_dev_bitmap);
 
-    ucp_gpu_nic_assignment_append_device_names(gpu, &gpu_strb);
-
-    ucs_string_buffer_appendf(&gpu_strb, " (bdf %s sys_dev ",
-                              ucs_topo_sys_device_bdf_name(gpu->sys_devs[0],
-                                                           bdf_name,
-                                                           sizeof(bdf_name)));
-    ucs_string_buffer_append_array(&gpu_strb, "/", "%hhu", gpu->sys_devs,
-                                   gpu->num_sys_devs);
-    ucs_string_buffer_appendf(&gpu_strb, ")");
+    ucp_gpu_nic_assignment_append_gpu(gpu, &gpu_strb);
 
     ucs_array_for_each(nic, &group->nics) {
         if (!ucp_gpu_nic_bitmap_get(nic_sys_dev_bitmap, nic->sys_devs[0])) {
@@ -444,6 +468,37 @@ ucp_gpu_nic_assignment_build(const ucs_topo_groups_t *groups,
     *assignment_p = assignment;
 
     return UCS_OK;
+}
+
+size_t ucp_gpu_nic_assignment_find_gpus_without_nics(
+        const ucp_gpu_nic_assignment_t *assignment,
+        const ucs_topo_groups_t *groups, ucs_string_buffer_t *strb)
+{
+    size_t num_gpus = 0;
+    const ucs_sys_device_bitmap_t *nic_sys_dev_bitmap;
+    const ucs_topo_group_element_t *gpu;
+    const ucs_topo_group_t *group;
+
+    ucs_array_for_each(group, groups) {
+        ucs_array_for_each(gpu, &group->gpus) {
+            nic_sys_dev_bitmap =
+                    ucp_gpu_nic_assignment_lookup(assignment, gpu->sys_devs[0]);
+            ucs_assertv(nic_sys_dev_bitmap != NULL,
+                        "gpu sys_dev %u has no nic bitmap", gpu->sys_devs[0]);
+            if (!UCS_STATIC_BITMAP_IS_ZERO(*nic_sys_dev_bitmap) ||
+                !ucp_gpu_nic_assignment_gpu_is_visible(gpu)) {
+                continue;
+            }
+
+            if (num_gpus++ > 0) {
+                ucs_string_buffer_appendf(strb, ", ");
+            }
+
+            ucp_gpu_nic_assignment_append_gpu(gpu, strb);
+        }
+    }
+
+    return num_gpus;
 }
 
 int ucp_gpu_nic_bitmap_get(const ucs_sys_device_bitmap_t *bitmap,

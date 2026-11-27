@@ -3078,6 +3078,17 @@ ucp_context_gpu_nic_assignment_check_config(ucp_context_h context,
     return UCS_ERR_INVALID_PARAM;
 }
 
+static void
+ucp_context_gpu_nic_assignment_cleanup(ucp_gpu_nic_assignment_t *assignment)
+{
+    if (assignment == NULL) {
+        return;
+    }
+
+    ucp_gpu_nic_assignment_release(assignment);
+    ucs_free(assignment);
+}
+
 /* Handle an error during gpu-nic assignment initialization, when the
  * assignment mode is AUTO then we log and continue without assignment. */
 static ucs_status_t
@@ -3103,6 +3114,8 @@ static ucs_status_t ucp_context_gpu_nic_assignment_init(ucp_context_h context)
             context->config.ext.gpu_nic_assignment_mode;
     ucs_sys_device_bitmap_t net_device_filter =
             UCS_STATIC_BITMAP_ZERO_INITIALIZER;
+    UCS_STRING_BUFFER_ONSTACK(gpus, 512);
+    UCS_STRING_BUFFER_ONSTACK(reason, 512);
     ucp_gpu_nic_assignment_t *assignment;
     ucs_topo_groups_t groups;
     ucs_status_t status;
@@ -3168,22 +3181,25 @@ static ucs_status_t ucp_context_gpu_nic_assignment_init(ucp_context_h context)
         goto out_release_groups;
     }
 
+    /* TODO: Remove this check once PXN lets a GPU without NICs use the NICs
+     * of other GPUs */
+    if (ucp_gpu_nic_assignment_find_gpus_without_nics(assignment, &groups,
+                                                      &gpus) > 0) {
+        ucs_string_buffer_appendf(&reason,
+                                  "0 nics assigned to %s (check "
+                                  "UCX_NET_DEVICES and UCX_TLS)",
+                                  ucs_string_buffer_cstr(&gpus));
+        ucp_context_gpu_nic_assignment_cleanup(assignment);
+        status = ucp_context_gpu_nic_assignment_unavailable(
+                context, mode, ucs_string_buffer_cstr(&reason));
+        goto out_release_groups;
+    }
+
     context->gpu_nic_assignment = assignment;
 
 out_release_groups:
     ucs_topo_release_groups(&groups);
     return status;
-}
-
-static void
-ucp_context_gpu_nic_assignment_cleanup(ucp_gpu_nic_assignment_t *assignment)
-{
-    if (assignment == NULL) {
-        return;
-    }
-
-    ucp_gpu_nic_assignment_release(assignment);
-    ucs_free(assignment);
 }
 
 ucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_version,

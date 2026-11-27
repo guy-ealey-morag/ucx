@@ -8,18 +8,30 @@
 #include <ucp/core/ucp_gpu_nic_assignment.h>
 
 #include <cstring>
+#include <string>
 #include <vector>
 
 class test_ucp_gpu_nic_assignment : public ucs::test {
 public:
-    test_ucp_gpu_nic_assignment() : m_groups(), m_assignment()
+    test_ucp_gpu_nic_assignment() :
+        m_groups(), m_assignment(), m_topo_state(nullptr)
     {
+    }
+
+    virtual void init()
+    {
+        ucs::test::init();
+        m_topo_state = ucs_topo_extract_state();
+        ASSERT_NE(nullptr, m_topo_state);
     }
 
     virtual void cleanup()
     {
         ucp_gpu_nic_assignment_release(&m_assignment);
         ucs_topo_release_groups(&m_groups);
+        if (m_topo_state != nullptr) {
+            ucs_topo_restore_state(m_topo_state);
+        }
         ucs::test::cleanup();
     }
 
@@ -116,6 +128,64 @@ protected:
                 }
             }
         }
+    }
+
+    /* A device on a PCI domain that the host does not have, registered with
+     * a user value (like a GPU the process can use) or without one (like a
+     * GPU hidden by CUDA_VISIBLE_DEVICES) */
+    static ucs_sys_device_t register_device(uint8_t bus, uintptr_t user_value)
+    {
+        const ucs_sys_bus_id_t bus_id = {0xfffa, bus, 0x1f, 0};
+        ucs_sys_device_t sys_dev      = UCS_SYS_DEVICE_ID_UNKNOWN;
+
+        if (user_value == UCS_SYS_DEVICE_USER_VALUE_EMPTY) {
+            ASSERT_UCS_OK(ucs_topo_find_device_by_bus_id(&bus_id, &sys_dev));
+        } else {
+            ASSERT_UCS_OK(ucs_topo_find_device_by_bus_id_and_user_value(
+                    &bus_id, user_value, &sys_dev));
+        }
+
+        return sys_dev;
+    }
+
+    void build_group(const std::vector<ucs_sys_device_t> &gpus,
+                     const std::vector<ucs_sys_device_t> &nics)
+    {
+        ucs_topo_group_element_t *element;
+        ucs_topo_group_t *group;
+
+        ucs_topo_release_groups(&m_groups);
+        ucs_array_init_dynamic(&m_groups);
+        group = ucs_array_append(&m_groups, FAIL() << "Failed to append group");
+        ucs_topo_init_group(group);
+
+        for (auto gpu : gpus) {
+            element = ucs_array_append(&group->gpus,
+                                       FAIL() << "Failed to append GPU");
+            std::memset(element, 0, sizeof(*element));
+            element->sys_devs[0]  = gpu;
+            element->num_sys_devs = 1;
+        }
+
+        for (auto nic : nics) {
+            element = ucs_array_append(&group->nics,
+                                       FAIL() << "Failed to append NIC");
+            std::memset(element, 0, sizeof(*element));
+            element->sys_devs[0]  = nic;
+            element->num_sys_devs = 1;
+        }
+    }
+
+    size_t find_gpus_without_nics(std::string &gpus) const
+    {
+        UCS_STRING_BUFFER_ONSTACK(strb, 512);
+        size_t num_gpus;
+
+        num_gpus = ucp_gpu_nic_assignment_find_gpus_without_nics(&m_assignment,
+                                                                 &m_groups,
+                                                                 &strb);
+        gpus     = ucs_string_buffer_cstr(&strb);
+        return num_gpus;
     }
 
     void build_assignment(ucp_gpu_nic_assignment_mode_t mode)
@@ -325,6 +395,7 @@ protected:
 private:
     ucs_topo_groups_t m_groups;
     ucp_gpu_nic_assignment_t m_assignment;
+    ucs_global_state_t *m_topo_state;
 };
 
 UCS_TEST_F(test_ucp_gpu_nic_assignment, no_nics) {
@@ -378,4 +449,56 @@ UCS_TEST_F(test_ucp_gpu_nic_assignment, shared) {
     check_assignment(3, 2, 4, UCP_GPU_NIC_ASSIGNMENT_MODE_SHARED, {});
     /* More GPUs than NICs. */
     check_assignment(2, 3, 2, UCP_GPU_NIC_ASSIGNMENT_MODE_SHARED, {});
+}
+
+UCS_TEST_F(test_ucp_gpu_nic_assignment, gpus_without_nics) {
+    const ucs_sys_device_t gpu0 = register_device(0xf0, 0);
+    const ucs_sys_device_t gpu1 = register_device(0xf1, 1);
+    const ucs_sys_device_t nic0 =
+            register_device(0xf2, UCS_SYS_DEVICE_USER_VALUE_EMPTY);
+    const ucs_sys_device_t nic1 =
+            register_device(0xf3, UCS_SYS_DEVICE_USER_VALUE_EMPTY);
+    std::string gpus;
+
+    /* flip gives the only NIC to the first GPU */
+    build_group({gpu0, gpu1}, {nic0});
+    build_assignment(UCP_GPU_NIC_ASSIGNMENT_MODE_FLIP);
+    EXPECT_EQ(1u, find_gpus_without_nics(gpus));
+    EXPECT_NE(std::string::npos, gpus.find(ucs_topo_sys_device_get_name(gpu1)))
+            << gpus;
+    EXPECT_EQ(std::string::npos, gpus.find(ucs_topo_sys_device_get_name(gpu0)))
+            << gpus;
+
+    build_group({gpu0, gpu1}, {nic0, nic1});
+    build_assignment(UCP_GPU_NIC_ASSIGNMENT_MODE_FLIP);
+    EXPECT_EQ(0u, find_gpus_without_nics(gpus)) << gpus;
+
+    /* shared leaves a GPU without NICs only in a group without NICs */
+    build_group({gpu0, gpu1}, {nic0});
+    build_assignment(UCP_GPU_NIC_ASSIGNMENT_MODE_SHARED);
+    EXPECT_EQ(0u, find_gpus_without_nics(gpus)) << gpus;
+
+    build_group({gpu0, gpu1}, {});
+    build_assignment(UCP_GPU_NIC_ASSIGNMENT_MODE_SHARED);
+    EXPECT_EQ(2u, find_gpus_without_nics(gpus)) << gpus;
+}
+
+UCS_TEST_F(test_ucp_gpu_nic_assignment, hidden_gpus_without_nics) {
+    const ucs_sys_device_t visible = register_device(0xf4, 2);
+    const ucs_sys_device_t hidden =
+            register_device(0xf5, UCS_SYS_DEVICE_USER_VALUE_EMPTY);
+    const ucs_sys_device_t nic =
+            register_device(0xf6, UCS_SYS_DEVICE_USER_VALUE_EMPTY);
+    std::string gpus;
+
+    build_group({visible, hidden}, {nic});
+    build_assignment(UCP_GPU_NIC_ASSIGNMENT_MODE_FLIP);
+    EXPECT_EQ(0u, find_gpus_without_nics(gpus)) << gpus;
+
+    build_group({hidden, visible}, {nic});
+    build_assignment(UCP_GPU_NIC_ASSIGNMENT_MODE_FLIP);
+    EXPECT_EQ(1u, find_gpus_without_nics(gpus));
+    EXPECT_NE(std::string::npos,
+              gpus.find(ucs_topo_sys_device_get_name(visible)))
+            << gpus;
 }
